@@ -263,7 +263,7 @@ cargo test
 - Agent 只能访问 trusted workspace
 - 文件路径必须规范化后再判断边界
 - 禁止路径穿越
-- 默认禁止访问 workspace 外路径
+- 默认禁止访问 workspace 外路径；第一版 workspace 外路径一律阻止，不进入普通审批流程
 - 默认禁止修改 `.git` 目录
 
 ### 10.2 文件规则
@@ -281,6 +281,7 @@ cargo test
 ```text
 删除文件
 移动或重命名文件
+读取敏感文件
 修改敏感文件
 修改构建或依赖配置
 大范围文件修改
@@ -294,6 +295,7 @@ cargo test
 修改 .git 目录
 路径穿越
 写入系统目录
+读取或修改密钥类、凭证类、私钥类文件
 ```
 
 ### 10.3 命令规则
@@ -311,6 +313,20 @@ BLOCKED
 ```text
 用户配置的白名单命令
 ```
+
+命令白名单必须使用结构化规则，不允许只用字符串前缀匹配。规则至少包含：
+
+```text
+executable
+argsPattern
+cwdScope
+allowPipe
+allowRedirect
+allowBackground
+envPolicy
+```
+
+第一版默认不允许管道、重定向、后台执行和内联脚本拼接。白名单命令默认只能在 trusted workspace 内执行。
 
 默认需要审批：
 
@@ -338,6 +354,7 @@ curl | sh
 ```text
 删除文件
 移动或重命名文件
+读取敏感文件
 修改敏感文件
 修改高影响文件
 大范围 patch
@@ -369,6 +386,8 @@ patch 摘要
 ```
 
 ## 12. MVP 审计日志范围
+
+第一版的审计强度定位为可追踪、可回放、可解释，不承诺日志防篡改或合规审计级别能力。
 
 第一版必须记录以下事件：
 
@@ -453,8 +472,25 @@ metadata
 
 - `events.jsonl` 用于追加写入审计事件
 - `state.json` 保存运行时状态
-- `file-changes.json` 保存文件变更和 diff
+- `file-changes.json` 保存文件变更、diff 和变更前后证据
 - `report.md` 保存任务结束报告
+
+`FileChange` 至少应记录：
+
+```text
+path
+changeType
+diff
+beforeHash
+afterHash
+baseRevision
+observedAt
+patchApplyStatus
+lineAdded
+lineDeleted
+```
+
+这些字段用于确认 Agent 修改的是它实际观察过的文件版本，并辅助发现并发修改或用户中途手动改文件的问题。
 
 后续可以迁移到 SQLite、PostgreSQL 或其他数据库。
 

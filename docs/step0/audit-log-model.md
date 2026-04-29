@@ -20,6 +20,14 @@
 
 审计日志是后续任务回放、执行可视化、文件变更追踪、审批历史和问题诊断的基础。
 
+第一版的可审计强度定位为可追踪、可回放、可解释：
+
+- 可追踪：能看到 Agent 做过哪些动作
+- 可回放：能按时间顺序重建主要执行过程
+- 可解释：能看到关键动作的原因、权限判断和结果
+
+第一版不承诺日志防篡改、法律证据级审计或合规审计级别能力。事件签名、防篡改哈希链、远程归档和组织级审计策略属于后续增强范围。
+
 ## 2. 核心原则
 
 ### 2.1 追加写入
@@ -508,6 +516,8 @@ fileChangeId
 
 完整 diff 可以存放在 `FileChange` 中，审计事件只记录摘要和关联 ID。
 
+`FileChange` 应同时记录 `beforeHash`、`afterHash`、`baseRevision` 或 `observedAt`、`patchApplyStatus`、`lineAdded`、`lineDeleted`，用于证明变更基于 Agent 实际观察过的文件版本。
+
 ### 13.4 FileDeleted
 
 文件被删除。
@@ -551,6 +561,8 @@ workspace 外路径
 路径穿越
 敏感文件未审批
 ```
+
+第一版中，workspace 外路径一律阻止，不进入普通审批流程。如果用户需要访问新的目录，应通过手动扩大 workspace 边界实现。
 
 ## 14. 命令事件
 
@@ -894,6 +906,13 @@ class FileChange {
   +path
   +changeType
   +diff
+  +beforeHash
+  +afterHash
+  +baseRevision
+  +observedAt
+  +patchApplyStatus
+  +lineAdded
+  +lineDeleted
 }
 
 class CommandExecution {

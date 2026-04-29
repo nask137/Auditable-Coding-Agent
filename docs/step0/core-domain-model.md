@@ -86,9 +86,9 @@ lastUsedAt
 
 关键规则：
 
-- Agent 默认不能访问 workspace 外路径
+- Agent 默认不能访问 workspace 外路径；第一版中 workspace 外路径一律阻止，不进入普通审批流程
 - Agent 默认不能修改 `.git` 目录
-- Agent 默认不能读取或修改敏感文件，除非用户额外审批
+- Agent 默认不能读取或修改敏感文件，除非用户额外审批；密钥类、凭证类文件可以直接阻止
 - 所有文件操作必须绑定到某个 Workspace
 
 ### 3.2 Task
@@ -239,7 +239,9 @@ FAIL
 
 ### 3.7 AgentAction
 
-`AgentAction` 表示 Agent 在某个 Step 中做出的下一步动作决策。
+`AgentAction` 表示 Agent 在某个 Step 中做出的一个原子动作意图。
+
+一个 `AgentStep` 可以包含多个 `AgentAction`。一个 `AgentAction` 最多绑定一个实际执行对象，例如一次工具调用、一次文件变更、一次命令执行或一次审批请求。
 
 建议字段：
 
@@ -322,6 +324,13 @@ path
 changeType
 reason
 diff
+beforeHash
+afterHash
+baseRevision
+observedAt
+patchApplyStatus
+lineAdded
+lineDeleted
 riskLevel
 approvalId
 createdAt
@@ -345,6 +354,7 @@ MOVE
 
 - 删除文件
 - 移动文件
+- 读取敏感文件
 - 修改敏感文件
 - 大范围修改
 
@@ -653,6 +663,13 @@ class FileChange {
   +changeType
   +reason
   +diff
+  +beforeHash
+  +afterHash
+  +baseRevision
+  +observedAt
+  +patchApplyStatus
+  +lineAdded
+  +lineDeleted
   +riskLevel
   +approvalId
   +createdAt
@@ -761,7 +778,16 @@ AgentStep "1" --> "0..*" CommandExecution
 AgentStep "1" --> "0..*" ValidationResult
 
 AgentAction "1" --> "0..1" ToolCall
+AgentAction "1" --> "0..1" FileChange
+AgentAction "1" --> "0..1" CommandExecution
 AgentAction "1" --> "0..1" ApprovalRequest
+
+note right of AgentAction
+  AgentAction is an atomic intent.
+  It should bind to at most one actual
+  execution object: ToolCall, FileChange,
+  CommandExecution, or ApprovalRequest.
+end note
 
 ToolCall "1" --> "0..1" ToolResult
 
@@ -810,7 +836,9 @@ MemoryEntry "0..*" --> "0..1" Task : source
 
 `AgentStep` 表示一次执行循环。
 
-`AgentAction` 表示这次循环中 Agent 决定做的动作。
+`AgentAction` 表示这次循环中 Agent 决定做的一个原子动作意图。
+
+一个 Step 可以产生多个 Action；一个 Action 最多绑定一个实际执行对象。若一次 Step 需要多个 tool call，应拆成多个 AgentAction，而不是让一个 Action 承载多个执行事实。
 
 这样可以支持一个 Step 中产生不同类型动作：
 
@@ -828,11 +856,16 @@ MemoryEntry "0..*" --> "0..1" Task : source
 - 变更类型
 - 变更原因
 - diff
+- beforeHash
+- afterHash
+- baseRevision 或 observedAt
+- patchApplyStatus
+- lineAdded / lineDeleted
 - 关联 step
 - 关联 approval
 - 风险等级
 
-这样才能在任务结束后回答“为什么改了这个文件”和“是哪一步改的”。
+这样才能在任务结束后回答“为什么改了这个文件”“是哪一步改的”以及“Agent 修改的是它实际读过的那个版本吗”。
 
 ### 5.6 命令执行必须经过策略判断
 

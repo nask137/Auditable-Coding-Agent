@@ -56,9 +56,9 @@ AgentAction
 - 未信任的 Workspace 默认不可访问
 - 所有文件路径必须规范化后再判断边界
 - 符号链接、相对路径、路径穿越都必须解析到真实路径后再判断
-- Agent 默认不能访问 workspace 外路径
+- Agent 默认不能访问 workspace 外路径；第一版中 workspace 外路径一律阻止，不进入普通审批流程
 - Agent 默认不能修改 `.git` 目录
-- Agent 默认不能读取或修改敏感文件，除非用户额外审批
+- Agent 默认不能读取或修改敏感文件，除非用户额外审批；密钥类、凭证类文件可以直接阻止
 
 Workspace 建议字段：
 
@@ -232,6 +232,7 @@ FILE_MODIFY
 ```text
 FILE_DELETE
 FILE_MOVE
+读取敏感文件
 修改敏感文件
 修改构建或依赖配置
 大范围文件修改
@@ -247,6 +248,7 @@ FILE_MOVE
 路径穿越
 写入系统目录
 覆盖用户未授权目录文件
+读取或修改密钥类、凭证类、私钥类文件
 ```
 
 ## 6. 敏感文件和高影响文件
@@ -254,6 +256,15 @@ FILE_MOVE
 ### 6.1 敏感文件
 
 敏感文件默认需要审批，必要时可以直接阻止。
+
+统一规则：
+
+```text
+敏感文件读取：默认 REQUIRE_APPROVAL
+敏感文件修改：默认 REQUIRE_APPROVAL
+密钥类、凭证类、私钥类文件读取或修改：可以直接 BLOCK
+审计日志中永远不保存敏感文件内容，只保存路径、原因、脱敏摘要
+```
 
 建议默认敏感文件：
 
@@ -304,17 +315,17 @@ BLOCKED
 
 用户明确加入白名单的命令，可以自动执行。
 
-建议白名单命令必须同时匹配：
+命令白名单不是字符串白名单，而是结构化规则。建议白名单命令必须同时匹配：
 
-- 命令主程序
-- 参数结构
-- 工作目录范围
-- 是否允许通配符
-- 是否允许重定向
-- 是否允许管道
-- 是否允许后台运行
+- executable：命令主程序
+- argsPattern：参数结构
+- cwdScope：工作目录范围
+- allowPipe：是否允许管道
+- allowRedirect：是否允许重定向
+- allowBackground：是否允许后台运行
+- envPolicy：环境变量继承和覆盖策略
 
-不建议只用字符串前缀判断命令安全性。
+第一版默认不允许管道、重定向、后台执行和内联脚本拼接。不建议只用字符串前缀判断命令安全性。
 
 ### 7.2 APPROVAL_REQUIRED
 
@@ -442,7 +453,7 @@ Git 写操作
 删除文件
 移动或重命名文件
 执行未加入白名单的命令
-访问 workspace 外路径
+读取敏感文件
 修改敏感文件
 修改构建或依赖配置
 大范围文件修改
@@ -451,6 +462,8 @@ Git 写操作
 Git 写操作
 启动长期运行进程
 ```
+
+访问 workspace 外路径不进入普通审批流程。第一版应直接 `BLOCK`，如果用户确实需要访问新目录，应通过手动扩大 workspace 边界实现。
 
 审批请求建议字段：
 
@@ -638,6 +651,7 @@ class CommandPolicy {
   +allowPipe
   +allowRedirect
   +allowBackground
+  +envPolicy
 }
 
 class RiskAssessment {
@@ -763,7 +777,7 @@ if (是否为文件操作?) then (是)
       :评估文件操作风险;
     endif
   else (否)
-    :BLOCK 或 REQUIRE_APPROVAL;
+    :BLOCK;
     :记录 workspace 越界事件;
     stop
   endif
