@@ -26,6 +26,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+/**
+ * Tool service for audited workspace file operations.
+ *
+ * <p>Every public method follows the same safety shape: create a tool-call
+ * record, resolve the path within the workspace, classify permission, optionally
+ * consume/create approval, perform the I/O, then store both audit and result
+ * records.</p>
+ */
 @Service
 public class FileToolService {
     private static final List<String> HIGH_IMPACT_FILES = List.of(
@@ -41,6 +49,9 @@ public class FileToolService {
     private final DiffSupport diffSupport;
     private final AgentSettings settings;
 
+    /**
+     * Creates a file tool service.
+     */
     public FileToolService(WorkspacePathGuard pathGuard, PermissionService permissionService,
                            ApprovalService approvalService, ToolRecordRepository toolRecords,
                            FileChangeRepository fileChanges, AuditService auditService,
@@ -55,6 +66,9 @@ public class FileToolService {
         this.settings = settings;
     }
 
+    /**
+     * Lists readable regular files under a workspace-relative path.
+     */
     public ToolExecutionResult listFiles(ToolExecutionContext context, String path, int maxDepth) {
         var input = Map.<String, Object>of("path", path, "maxDepth", maxDepth);
         var call = startTool(context, "list_files", Domain.PermissionLevel.READ_ONLY, "List files", input);
@@ -68,6 +82,8 @@ public class FileToolService {
             var root = check.absolutePath();
             var files = new ArrayList<String>();
             try (Stream<Path> walk = Files.walk(root, Math.max(1, maxDepth))) {
+                // The walk is capped and then each file is re-checked through the
+                // permission service, so broad listings do not leak sensitive paths.
                 walk.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
                         .sorted(Comparator.comparing(Path::toString))
                         .limit(500)
@@ -81,6 +97,9 @@ public class FileToolService {
         }
     }
 
+    /**
+     * Reads a UTF-8 file after path and permission checks.
+     */
     public ToolExecutionResult readFile(ToolExecutionContext context, String path) {
         var input = Map.<String, Object>of("path", path);
         var call = startTool(context, "read_file", Domain.PermissionLevel.READ_ONLY, "Read file", input);
@@ -93,6 +112,8 @@ public class FileToolService {
             }
             var content = Files.readString(check.absolutePath(), StandardCharsets.UTF_8);
             if (content.length() > settings.maxReadBytes()) {
+                // Return a bounded prefix rather than failing so the model can
+                // still inspect large files without overloading storage/API output.
                 content = content.substring(0, settings.maxReadBytes());
             }
             auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
@@ -108,6 +129,9 @@ public class FileToolService {
         }
     }
 
+    /**
+     * Searches readable files for a literal text query.
+     */
     public ToolExecutionResult searchText(ToolExecutionContext context, String query) {
         var call = startTool(context, "search_text", Domain.PermissionLevel.READ_ONLY, "Search text", Map.of("query", query));
         try {
@@ -126,6 +150,9 @@ public class FileToolService {
         }
     }
 
+    /**
+     * Creates a new UTF-8 file and records the resulting file change.
+     */
     public ToolExecutionResult createFile(ToolExecutionContext context, String path, String content, String reason) {
         var input = Map.<String, Object>of("path", path, "reason", reason);
         var call = startTool(context, "create_file", Domain.PermissionLevel.WORKSPACE_WRITE, "Create file", input);
@@ -138,6 +165,8 @@ public class FileToolService {
                 return permission;
             }
             if (Files.exists(check.absolutePath())) {
+                // Existing files are not overwritten by createFile. Modifications
+                // must go through applyPatch so diffs and patch budgets are clear.
                 completeTool(call.id(), true, "File already exists: " + check.relativePath(), Map.of("path", check.relativePath(), "changed", false), null);
                 return ToolExecutionResult.success("File already exists: " + check.relativePath(), Map.of("changed", false));
             }
@@ -160,6 +189,9 @@ public class FileToolService {
         }
     }
 
+    /**
+     * Replaces one exact text fragment in a file and records the mutation.
+     */
     public ToolExecutionResult applyPatch(ToolExecutionContext context, String path, String oldText, String newText, String reason) {
         var call = startTool(context, "apply_patch", Domain.PermissionLevel.WORKSPACE_WRITE, "Apply patch",
                 Map.of("path", path, "reason", reason));
@@ -167,6 +199,8 @@ public class FileToolService {
             var check = pathGuard.check(context.workspace(), path, true);
             var before = Files.readString(check.absolutePath(), StandardCharsets.UTF_8);
             if (!before.contains(oldText)) {
+                // Exact matching prevents accidental broad edits when the model's
+                // view of the file is stale.
                 failTool(call.id(), "Patch oldText not found");
                 return ToolExecutionResult.blocked("Patch oldText not found: " + check.relativePath());
             }
@@ -194,6 +228,9 @@ public class FileToolService {
         }
     }
 
+    /**
+     * Opens a tool-call record and emits the corresponding audit event.
+     */
     private com.nask.agent.tool.ToolCallRecord startTool(ToolExecutionContext context, String toolName,
                                                           Domain.PermissionLevel permissionLevel,
                                                           String inputSummary, Map<String, Object> input) {
@@ -205,15 +242,24 @@ public class FileToolService {
         return call;
     }
 
+    /**
+     * Completes a tool-call row and stores its result payload.
+     */
     private void completeTool(UUID callId, boolean success, String summary, Map<String, Object> payload, String error) {
         toolRecords.completeCall(callId, success ? Domain.ToolCallStatus.COMPLETED : Domain.ToolCallStatus.FAILED);
         toolRecords.insertResult(callId, success, summary, payload == null ? Map.of() : payload, error, Map.of());
     }
 
+    /**
+     * Records a failed tool result with a uniform empty payload.
+     */
     private void failTool(UUID callId, String error) {
         completeTool(callId, false, error, Map.of(), error);
     }
 
+    /**
+     * Converts a permission decision into either allow, approval pause, or block.
+     */
     private ToolExecutionResult handlePermission(ToolExecutionContext context, UUID callId, PermissionDecision decision,
                                                  List<String> files, String command, String cwd, String preview) {
         auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
@@ -230,6 +276,8 @@ public class FileToolService {
         if (decision.decision() == Domain.PermissionDecisionType.REQUIRE_APPROVAL) {
             var consumed = approvalService.consumeApproved(context.runId(), decision.approvalType(), files, command, cwd);
             if (consumed != null) {
+                // One-time approval consumption lets a retried operation continue
+                // without opening a new request, while keeping the audit link.
                 auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
                         Domain.AuditEventType.PermissionAllowed, Domain.AuditActor.RUNTIME, Domain.AuditLevel.INFO,
                         "Permission allowed by approved request", decision.reason(), files, callId, consumed.id(),
@@ -256,6 +304,9 @@ public class FileToolService {
         return ToolExecutionResult.blocked(decision.reason());
     }
 
+    /**
+     * Persists a file change with hashes used to identify before/after content.
+     */
     private FileChange recordChange(ToolExecutionContext context, String path, Domain.ChangeType changeType, String reason,
                                     String diff, String before, String after, Domain.PatchApplyStatus patchStatus,
                                     int added, int deleted, Domain.RiskLevel riskLevel, UUID approvalId) {
@@ -265,11 +316,17 @@ public class FileToolService {
                 added, deleted, riskLevel.name(), approvalId, Instant.now()));
     }
 
+    /**
+     * Identifies files that should require approval even when not secret-like.
+     */
     private boolean highImpact(String relativePath) {
         var name = Path.of(relativePath).getFileName();
         return name != null && HIGH_IMPACT_FILES.contains(name.toString());
     }
 
+    /**
+     * Adds a file to a listing only if it remains readable after guard checks.
+     */
     private void addIfReadable(ToolExecutionContext context, Path file, List<String> files) {
         var root = Path.of(context.workspace().rootPath()).toAbsolutePath().normalize();
         var relative = root.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/');
@@ -280,6 +337,9 @@ public class FileToolService {
         }
     }
 
+    /**
+     * Searches one file and ignores binary/unreadable content.
+     */
     private void searchFile(ToolExecutionContext context, Path root, Path file, String query, List<String> matches) {
         if (query == null || query.isBlank() || matches.size() >= 100) {
             return;

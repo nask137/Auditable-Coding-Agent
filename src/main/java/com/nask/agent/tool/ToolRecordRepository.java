@@ -12,16 +12,25 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for tool call and tool result records.
+ */
 @Repository
 public class ToolRecordRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository backed by JDBC and JSON helpers.
+     */
     public ToolRecordRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Starts a tool call record in {@code RUNNING} status.
+     */
     public ToolCallRecord insertCall(UUID actionId, String toolName, Domain.PermissionLevel permissionLevel,
                                      String inputSummary, Map<String, Object> inputPayload) {
         var record = new ToolCallRecord(UUID.randomUUID(), actionId, toolName, permissionLevel.name(), inputSummary,
@@ -42,6 +51,9 @@ public class ToolRecordRepository {
         return record;
     }
 
+    /**
+     * Completes or blocks a tool call.
+     */
     public void completeCall(UUID toolCallId, Domain.ToolCallStatus status) {
         jdbc.update("update tool_call set status = :status, finished_at = :finishedAt where id = :id",
                 new MapSqlParameterSource()
@@ -50,6 +62,9 @@ public class ToolRecordRepository {
                         .addValue("finishedAt", ts(Instant.now())));
     }
 
+    /**
+     * Inserts the output record for a completed tool call.
+     */
     public ToolResultRecord insertResult(UUID toolCallId, boolean success, String outputSummary,
                                          Map<String, Object> outputPayload, String errorMessage,
                                          Map<String, Object> metadata) {

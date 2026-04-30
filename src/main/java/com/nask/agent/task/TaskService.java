@@ -12,18 +12,27 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Application service for task lifecycle changes.
+ */
 @Service
 public class TaskService {
     private final TaskRepository repository;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
 
+    /**
+     * Creates a task service.
+     */
     public TaskService(TaskRepository repository, WorkspaceService workspaceService, AuditService auditService) {
         this.repository = repository;
         this.workspaceService = workspaceService;
         this.auditService = auditService;
     }
 
+    /**
+     * Creates a task after verifying that the target workspace exists.
+     */
     @Transactional
     public CodingTask create(CreateTaskRequest request) {
         workspaceService.getRequired(request.workspaceId());
@@ -42,15 +51,24 @@ public class TaskService {
         return task;
     }
 
+    /**
+     * Loads a task or raises a REST-friendly 404 exception.
+     */
     public CodingTask getRequired(UUID id) {
         return repository.findById(id)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", "Task not found: " + id));
     }
 
+    /**
+     * Updates the task status without creating an audit event.
+     */
     public void updateStatus(UUID taskId, Domain.TaskStatus status) {
         repository.updateStatus(taskId, status);
     }
 
+    /**
+     * Cancels a task and writes an audit event.
+     */
     public CodingTask cancel(UUID taskId) {
         var task = getRequired(taskId);
         updateStatus(taskId, Domain.TaskStatus.CANCELLED);

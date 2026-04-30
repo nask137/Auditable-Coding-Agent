@@ -3,6 +3,9 @@ package com.nask.agent.file;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Persisted record of a file mutation made or attempted by the agent.
+ */
 public record FileChange(
         UUID id,
         UUID workspaceId,

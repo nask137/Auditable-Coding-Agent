@@ -15,16 +15,25 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for the {@code workspace} table.
+ */
 @Repository
 public class WorkspaceRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository using named-parameter JDBC and JSON helpers.
+     */
     public WorkspaceRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Inserts a new workspace row.
+     */
     public Workspace insert(Workspace workspace) {
         jdbc.update("""
                 insert into workspace (
@@ -39,16 +48,25 @@ public class WorkspaceRepository {
         return workspace;
     }
 
+    /**
+     * Looks up a workspace by id.
+     */
     public Optional<Workspace> findById(UUID id) {
         var rows = jdbc.query("select * from workspace where id = :id",
                 new MapSqlParameterSource("id", id), mapper());
         return rows.stream().findFirst();
     }
 
+    /**
+     * Lists all workspaces newest first.
+     */
     public List<Workspace> findAll() {
         return jdbc.query("select * from workspace order by created_at desc", mapper());
     }
 
+    /**
+     * Updates the last-used timestamp for a workspace.
+     */
     public void touch(UUID id) {
         jdbc.update("update workspace set last_used_at = now() where id = :id",
                 new MapSqlParameterSource("id", id));

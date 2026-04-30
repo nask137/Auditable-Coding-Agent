@@ -7,8 +7,18 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * Deterministic development implementation of {@link LlmGateway}.
+ *
+ * <p>The stub proves the runtime, persistence, approval, and audit loop without
+ * depending on external model credentials. Replacing it with a real gateway
+ * should keep the same method contracts.</p>
+ */
 @Component
 public class StubLlmGateway implements LlmGateway {
+    /**
+     * Produces a simple task understanding from the raw request text.
+     */
     @Override
     public TaskUnderstanding understandTask(TaskContext context) {
         return new TaskUnderstanding(
@@ -18,6 +28,9 @@ public class StubLlmGateway implements LlmGateway {
                 searchHints(context.userRequest()));
     }
 
+    /**
+     * Returns a fixed three-step plan used by the Phase 1 MVP.
+     */
     @Override
     public PlanDraft createPlan(PlanningContext context) {
         return new PlanDraft(List.of(
@@ -26,6 +39,9 @@ public class StubLlmGateway implements LlmGateway {
                 new PlanDraft.Item("Validate with an approved command if available", List.of(), "Validation is routed through command policy")));
     }
 
+    /**
+     * Maps the fixed plan item descriptions to local tool actions.
+     */
     @Override
     public AgentDecision decideNextAction(ExecutionContext context) {
         var description = context.currentItem().description().toLowerCase(Locale.ROOT);
@@ -41,11 +57,17 @@ public class StubLlmGateway implements LlmGateway {
         return new AgentDecision(context.currentItem().id(), List.of());
     }
 
+    /**
+     * Suggests a portable JVM smoke command as validation.
+     */
     @Override
     public ValidationDecision suggestValidation(ValidationContext context) {
         return new ValidationDecision(true, List.of("java", "-version"), "Run a portable JVM smoke validation command");
     }
 
+    /**
+     * Builds a minimal Markdown report draft.
+     */
     @Override
     public FinalReportDraft generateReport(ReportContext context) {
         return new FinalReportDraft("""
@@ -61,6 +83,9 @@ public class StubLlmGateway implements LlmGateway {
                 """.formatted(context.taskSummary(), context.resultSummary()));
     }
 
+    /**
+     * Infers a coarse task type from common keywords.
+     */
     private String inferType(String userRequest) {
         var lower = userRequest.toLowerCase(Locale.ROOT);
         if (lower.contains("bug") || lower.contains("fix") || lower.contains("修复")) {
@@ -72,6 +97,9 @@ public class StubLlmGateway implements LlmGateway {
         return "CODE_EDIT";
     }
 
+    /**
+     * Extracts short search hints from the request text.
+     */
     private List<String> searchHints(String userRequest) {
         var hints = new ArrayList<String>();
         for (var token : userRequest.split("\\s+")) {

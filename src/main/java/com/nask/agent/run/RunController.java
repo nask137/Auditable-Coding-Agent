@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * REST API for observing an agent run and its derived timeline.
+ */
 @RestController
 @RequestMapping("/api/runs")
 public class RunController {
@@ -19,22 +22,34 @@ public class RunController {
     private final PlanService planService;
     private final AgentStepService stepService;
 
+    /**
+     * Creates a run observation controller.
+     */
     public RunController(AgentRunService runService, PlanService planService, AgentStepService stepService) {
         this.runService = runService;
         this.planService = planService;
         this.stepService = stepService;
     }
 
+    /**
+     * Fetches run metadata and terminal status.
+     */
     @GetMapping("/{runId}")
     AgentRun get(@PathVariable UUID runId) {
         return runService.getRequired(runId);
     }
 
+    /**
+     * Fetches the generated plan for a run.
+     */
     @GetMapping("/{runId}/plan")
     PlanView plan(@PathVariable UUID runId) {
         return planService.getByRun(runId);
     }
 
+    /**
+     * Lists execution steps for a run in chronological order.
+     */
     @GetMapping("/{runId}/steps")
     List<AgentStep> steps(@PathVariable UUID runId) {
         return stepService.findByRun(runId);

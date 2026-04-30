@@ -22,6 +22,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Tool service that executes shell commands through policy, approval, and audit.
+ */
 @Service
 public class CommandToolService {
     private final CommandPolicyService policyService;
@@ -32,6 +35,9 @@ public class CommandToolService {
     private final WorkspacePathGuard pathGuard;
     private final AgentSettings settings;
 
+    /**
+     * Creates a command tool service.
+     */
     public CommandToolService(CommandPolicyService policyService, CommandExecutionRepository commandRepository,
                               ApprovalService approvalService, AuditService auditService,
                               ToolRecordRepository toolRecords, WorkspacePathGuard pathGuard,
@@ -45,6 +51,13 @@ public class CommandToolService {
         this.settings = settings;
     }
 
+    /**
+     * Runs a command if policy allows it or if a matching approval is consumed.
+     *
+     * <p>The method records a tool call immediately, validates the working
+     * directory against the workspace boundary, persists a command execution row,
+     * then either blocks, waits for approval, or spawns the process.</p>
+     */
     public ToolExecutionResult runCommand(ToolExecutionContext context, String executable, List<String> arguments,
                                           String workingDirectory, String reason) {
         var args = arguments == null ? List.<String>of() : arguments;
@@ -56,6 +69,8 @@ public class CommandToolService {
                 "Command requested", commandText, List.of(), call.id(), null, null, null,
                 Domain.PermissionLevel.SHELL_SAFE, Domain.RiskLevel.MEDIUM, null, true, null, null, Map.of()));
 
+        // Commands inherit the same workspace boundary as file tools; even a safe
+        // executable cannot run from a directory that resolves outside the root.
         var cwdCheck = pathGuard.check(context.workspace(), workingDirectory == null ? "." : workingDirectory, false);
         if (!cwdCheck.allowed()) {
             var execution = createExecution(context, commandText, executable, args, workingDirectory, Domain.CommandPolicyType.BLOCKED,
@@ -88,6 +103,8 @@ public class CommandToolService {
             var consumed = approvalService.consumeApproved(context.runId(), Domain.ApprovalType.COMMAND_EXECUTION,
                     List.of(), commandText, cwdCheck.relativePath());
             if (consumed != null) {
+                // Approved requests are one-time capabilities. Once consumed, the
+                // command can run but future identical attempts need fresh approval.
                 auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
                         Domain.AuditEventType.CommandAllowed, Domain.AuditActor.RUNTIME, Domain.AuditLevel.INFO,
                         "Command allowed by approved request", commandText, List.of(), call.id(), consumed.id(), execution.id(), null,
@@ -115,6 +132,8 @@ public class CommandToolService {
                     "Command approval required", commandText, List.of(), call.id(), approval.id(), execution.id(), null,
                     Domain.PermissionLevel.SHELL_RISKY, Domain.RiskLevel.HIGH, Domain.ApprovalStatus.PENDING,
                     true, null, null, Map.of()));
+            // Tool calls in WAITING_APPROVAL are represented as BLOCKED at the
+            // tool-call row level because no process has executed yet.
             toolRecords.completeCall(call.id(), Domain.ToolCallStatus.BLOCKED);
             toolRecords.insertResult(call.id(), false, "Waiting for command approval", Map.of(), null, Map.of("approvalId", approval.id().toString()));
             return ToolExecutionResult.waiting(approval.id(), "Command requires approval");
@@ -138,6 +157,9 @@ public class CommandToolService {
         return ToolExecutionResult.success(result.summary(), payload);
     }
 
+    /**
+     * Persists the command execution row in its initial status.
+     */
     private CommandExecution createExecution(ToolExecutionContext context, String commandText, String executable,
                                              List<String> arguments, String cwd, Domain.CommandPolicyType policy,
                                              Domain.RiskLevel risk, UUID approvalId, Domain.CommandExecutionStatus status) {
@@ -147,6 +169,9 @@ public class CommandToolService {
                 null, null, status == Domain.CommandExecutionStatus.RUNNING ? Instant.now() : null, null, Instant.now()));
     }
 
+    /**
+     * Spawns a process with merged stdout/stderr and bounded execution time.
+     */
     private ProcessResult executeProcess(String executable, List<String> arguments, Path cwd) {
         try {
             var command = new ArrayList<String>();
@@ -159,6 +184,8 @@ public class CommandToolService {
             var outputFuture = CompletableFuture.supplyAsync(() -> readOutput(process.getInputStream()));
             var finished = process.waitFor(settings.commandTimeoutSeconds(), TimeUnit.SECONDS);
             if (!finished) {
+                // Exit code 124 mirrors common Unix timeout behavior, making the
+                // summary easier to interpret for developers.
                 process.destroyForcibly();
                 return new ProcessResult(124, "Command timed out after " + settings.commandTimeoutSeconds()
                         + " seconds\n" + summarize(outputFuture.getNow("")));
@@ -170,6 +197,9 @@ public class CommandToolService {
         }
     }
 
+    /**
+     * Reads process output as UTF-8.
+     */
     private String readOutput(InputStream stream) {
         try {
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
@@ -178,6 +208,9 @@ public class CommandToolService {
         }
     }
 
+    /**
+     * Truncates command output stored in audit/result rows.
+     */
     private String summarize(String output) {
         if (output == null || output.isBlank()) {
             return "";
@@ -185,6 +218,9 @@ public class CommandToolService {
         return output.length() <= 4000 ? output : output.substring(0, 4000);
     }
 
+    /**
+     * Appends a standardized command-blocked audit event.
+     */
     private void auditBlocked(ToolExecutionContext context, UUID callId, UUID commandId, String command, String reason) {
         auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
                 Domain.AuditEventType.CommandBlocked, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
@@ -193,6 +229,9 @@ public class CommandToolService {
                 "COMMAND_BLOCKED", reason, Map.of()));
     }
 
+    /**
+     * Process exit code and summarized output.
+     */
     private record ProcessResult(int exitCode, String summary) {
     }
 }

@@ -15,18 +15,27 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * Owns approval creation, resolution, and one-time consumption semantics.
+ */
 @Service
 public class ApprovalService {
     private final ApprovalRepository repository;
     private final AuditService auditService;
     private final AgentRunService runService;
 
+    /**
+     * Creates an approval service.
+     */
     public ApprovalService(ApprovalRepository repository, AuditService auditService, AgentRunService runService) {
         this.repository = repository;
         this.auditService = auditService;
         this.runService = runService;
     }
 
+    /**
+     * Creates a pending approval request and pauses the associated run/task.
+     */
     @Transactional
     public ApprovalRequestRecord create(UUID taskId, UUID runId, UUID stepId, UUID actionId,
                                         Domain.ApprovalType type, Domain.RiskLevel riskLevel, String reason,
@@ -45,6 +54,9 @@ public class ApprovalService {
         return approval;
     }
 
+    /**
+     * Lists approvals, optionally by status string used by the API.
+     */
     public List<ApprovalRequestRecord> list(String status) {
         if (status == null || status.isBlank()) {
             return repository.findAll();
@@ -52,16 +64,27 @@ public class ApprovalService {
         return repository.findByStatus(Domain.ApprovalStatus.valueOf(status));
     }
 
+    /**
+     * Loads an approval request or raises a REST-friendly 404 exception.
+     */
     public ApprovalRequestRecord getRequired(UUID id) {
         return repository.findById(id).orElseThrow(() ->
                 new ApiException(HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND", "Approval not found: " + id));
     }
 
+    /**
+     * Consumes a matching previously approved request for a retried operation.
+     *
+     * <p>Matching is intentionally strict: type, affected files, command, and
+     * working directory must all match so approval for one risky operation cannot
+     * accidentally authorize a different operation.</p>
+     */
     @Transactional
     public ApprovalRequestRecord consumeApproved(UUID runId, Domain.ApprovalType type, List<String> affectedFiles,
                                                   String command, String workingDirectory) {
         var files = affectedFiles == null ? List.<String>of() : affectedFiles;
         for (var candidate : repository.findApprovedCandidates(runId, type)) {
+            // Compare normalized operation identity, not just approval type.
             if (!candidate.affectedFiles().equals(files)) {
                 continue;
             }
@@ -82,6 +105,9 @@ public class ApprovalService {
         return null;
     }
 
+    /**
+     * Approves a request and returns the run to running state.
+     */
     @Transactional
     public ApprovalRequestRecord approve(UUID id, ResolveApprovalRequest request) {
         var approval = getRequired(id);
@@ -95,6 +121,9 @@ public class ApprovalService {
         return getRequired(id);
     }
 
+    /**
+     * Denies a request and fails the associated run.
+     */
     @Transactional
     public ApprovalRequestRecord deny(UUID id, ResolveApprovalRequest request) {
         var approval = getRequired(id);

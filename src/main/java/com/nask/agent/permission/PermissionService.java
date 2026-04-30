@@ -4,13 +4,21 @@ import com.nask.agent.common.Domain;
 import com.nask.agent.workspace.PathCheck;
 import org.springframework.stereotype.Service;
 
+/**
+ * Central policy classifier for workspace file operations.
+ */
 @Service
 public class PermissionService {
+    /**
+     * Decides whether a file operation is allowed, requires approval, or blocked.
+     */
     public PermissionDecision fileDecision(PathCheck pathCheck, Domain.FileOperation operation, boolean highImpact, int patchLines) {
         if (!pathCheck.allowed()) {
             return PermissionDecision.block(Domain.RiskLevel.CRITICAL, pathCheck.reason());
         }
         if (pathCheck.blockedSensitive()) {
+            // Credentials/private keys are never exposed through approval because
+            // leaking their content is a higher-risk failure mode.
             return PermissionDecision.block(Domain.RiskLevel.CRITICAL, "Credential or private key file access is blocked");
         }
         if (pathCheck.sensitive()) {

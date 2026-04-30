@@ -17,16 +17,25 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for approval request rows.
+ */
 @Repository
 public class ApprovalRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository backed by JDBC and JSON helpers.
+     */
     public ApprovalRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Inserts a new pending approval request.
+     */
     public ApprovalRequestRecord insert(ApprovalRequestRecord approval) {
         jdbc.update("""
                 insert into approval_request (
@@ -42,20 +51,32 @@ public class ApprovalRepository {
         return approval;
     }
 
+    /**
+     * Finds an approval request by id.
+     */
     public Optional<ApprovalRequestRecord> findById(UUID id) {
         return jdbc.query("select * from approval_request where id = :id",
                 new MapSqlParameterSource("id", id), mapper()).stream().findFirst();
     }
 
+    /**
+     * Lists approvals by exact status.
+     */
     public List<ApprovalRequestRecord> findByStatus(Domain.ApprovalStatus status) {
         return jdbc.query("select * from approval_request where status = :status order by created_at",
                 new MapSqlParameterSource("status", status.name()), mapper());
     }
 
+    /**
+     * Lists all approval requests, newest first.
+     */
     public List<ApprovalRequestRecord> findAll() {
         return jdbc.query("select * from approval_request order by created_at desc", mapper());
     }
 
+    /**
+     * Finds approved requests that may be consumed by a retried operation.
+     */
     public List<ApprovalRequestRecord> findApprovedCandidates(UUID runId, Domain.ApprovalType type) {
         return jdbc.query("""
                 select * from approval_request
@@ -69,6 +90,9 @@ public class ApprovalRepository {
                 .addValue("status", Domain.ApprovalStatus.APPROVED.name()), mapper());
     }
 
+    /**
+     * Resolves an approval request as approved or denied.
+     */
     public void resolve(UUID id, Domain.ApprovalStatus status, String resolvedBy, String reason) {
         jdbc.update("""
                 update approval_request
@@ -85,6 +109,9 @@ public class ApprovalRepository {
                 .addValue("reason", reason));
     }
 
+    /**
+     * Marks an approved request as consumed by the operation it authorized.
+     */
     public void consume(UUID id) {
         jdbc.update("""
                 update approval_request

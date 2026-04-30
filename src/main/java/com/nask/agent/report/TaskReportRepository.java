@@ -13,14 +13,23 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for task reports.
+ */
 @Repository
 public class TaskReportRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
+    /**
+     * Creates a repository backed by named-parameter JDBC.
+     */
     public TaskReportRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Inserts a generated report.
+     */
     public TaskReport insert(TaskReport report) {
         jdbc.update("""
                 insert into task_report (id, task_id, run_id, content_md, created_at)
@@ -34,6 +43,9 @@ public class TaskReportRepository {
         return report;
     }
 
+    /**
+     * Returns the latest report for a task.
+     */
     public Optional<TaskReport> findLatestByTask(UUID taskId) {
         return jdbc.query("select * from task_report where task_id = :taskId order by created_at desc limit 1",
                 new MapSqlParameterSource("taskId", taskId), mapper()).stream().findFirst();

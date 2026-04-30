@@ -15,14 +15,23 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for agent step rows.
+ */
 @Repository
 public class AgentStepRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
+    /**
+     * Creates a repository backed by named-parameter JDBC.
+     */
     public AgentStepRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Inserts a running step.
+     */
     public AgentStep insert(AgentStep step) {
         jdbc.update("""
                 insert into agent_step (id, run_id, plan_item_id, step_type, status, input_summary, output_summary, started_at, finished_at)
@@ -31,6 +40,9 @@ public class AgentStepRepository {
         return step;
     }
 
+    /**
+     * Marks a step completed and stores its output summary.
+     */
     public void complete(UUID id, String outputSummary) {
         jdbc.update("""
                 update agent_step set status = :status, output_summary = :outputSummary, finished_at = :finishedAt where id = :id
@@ -41,6 +53,9 @@ public class AgentStepRepository {
                 .addValue("finishedAt", ts(Instant.now())));
     }
 
+    /**
+     * Marks a step failed and stores its output summary.
+     */
     public void fail(UUID id, String outputSummary) {
         jdbc.update("""
                 update agent_step set status = :status, output_summary = :outputSummary, finished_at = :finishedAt where id = :id
@@ -51,6 +66,9 @@ public class AgentStepRepository {
                 .addValue("finishedAt", ts(Instant.now())));
     }
 
+    /**
+     * Lists all steps for a run in timeline order.
+     */
     public List<AgentStep> findByRun(UUID runId) {
         return jdbc.query("select * from agent_step where run_id = :runId order by started_at, id",
                 new MapSqlParameterSource("runId", runId), mapper());

@@ -14,18 +14,27 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Application service for run lifecycle transitions.
+ */
 @Service
 public class AgentRunService {
     private final AgentRunRepository repository;
     private final TaskService taskService;
     private final AuditService auditService;
 
+    /**
+     * Creates a run service.
+     */
     public AgentRunService(AgentRunRepository repository, TaskService taskService, AuditService auditService) {
         this.repository = repository;
         this.taskService = taskService;
         this.auditService = auditService;
     }
 
+    /**
+     * Creates a new CODE_EDIT run and marks the task running.
+     */
     @Transactional
     public AgentRun createRun(CodingTask task) {
         var run = new AgentRun(UUID.randomUUID(), task.id(), "CODE_EDIT", Domain.AgentRunStatus.RUNNING.name(),
@@ -37,21 +46,33 @@ public class AgentRunService {
         return run;
     }
 
+    /**
+     * Loads a run or raises a REST-friendly 404 exception.
+     */
     public AgentRun getRequired(UUID id) {
         return repository.findById(id).orElseThrow(() ->
                 new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "AgentRun not found: " + id));
     }
 
+    /**
+     * Pauses run and task state until approval is resolved.
+     */
     public void markWaitingApproval(UUID runId, UUID taskId) {
         repository.updateStatus(runId, Domain.AgentRunStatus.WAITING_APPROVAL, null);
         taskService.updateStatus(taskId, Domain.TaskStatus.WAITING_APPROVAL);
     }
 
+    /**
+     * Returns a previously paused run and task to running state.
+     */
     public void markRunning(UUID runId, UUID taskId) {
         repository.updateStatus(runId, Domain.AgentRunStatus.RUNNING, null);
         taskService.updateStatus(taskId, Domain.TaskStatus.RUNNING);
     }
 
+    /**
+     * Marks run and task as completed and writes a terminal audit event.
+     */
     public void complete(UUID runId, UUID taskId) {
         repository.updateStatus(runId, Domain.AgentRunStatus.COMPLETED, null);
         taskService.updateStatus(taskId, Domain.TaskStatus.COMPLETED);
@@ -59,6 +80,9 @@ public class AgentRunService {
                 Domain.AuditActor.RUNTIME, "Finish agent run", "Task completed"));
     }
 
+    /**
+     * Marks run and task failed with a durable reason and audit event.
+     */
     public void fail(UUID runId, UUID taskId, String reason) {
         repository.updateStatus(runId, Domain.AgentRunStatus.FAILED, reason);
         taskService.updateStatus(taskId, Domain.TaskStatus.FAILED);

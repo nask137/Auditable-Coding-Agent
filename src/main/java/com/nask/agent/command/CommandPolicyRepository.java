@@ -11,21 +11,29 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for workspace command policies.
+ */
 @Repository
 public class CommandPolicyRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository backed by JDBC and JSON helpers.
+     */
     public CommandPolicyRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Inserts a new enabled policy.
+     */
     public CommandPolicy insert(CommandPolicy policy) {
         jdbc.update("""
                 insert into command_policy (
@@ -40,11 +48,17 @@ public class CommandPolicyRepository {
         return policy;
     }
 
+    /**
+     * Lists enabled policies for a workspace in creation order.
+     */
     public List<CommandPolicy> findByWorkspace(UUID workspaceId) {
         return jdbc.query("select * from command_policy where workspace_id = :workspaceId and enabled = true order by created_at",
                 new MapSqlParameterSource("workspaceId", workspaceId), mapper());
     }
 
+    /**
+     * Disables a policy without deleting its audit history.
+     */
     public void delete(UUID id) {
         jdbc.update("update command_policy set enabled = false, updated_at = :updatedAt where id = :id",
                 new MapSqlParameterSource().addValue("id", id).addValue("updatedAt", ts(Instant.now())));

@@ -15,14 +15,23 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for file change records.
+ */
 @Repository
 public class FileChangeRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
+    /**
+     * Creates a repository backed by named-parameter JDBC.
+     */
     public FileChangeRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Inserts a file change record.
+     */
     public FileChange insert(FileChange change) {
         jdbc.update("""
                 insert into file_change (
@@ -38,11 +47,17 @@ public class FileChangeRepository {
         return change;
     }
 
+    /**
+     * Lists file changes for a task in creation order.
+     */
     public List<FileChange> findByTask(UUID taskId) {
         return jdbc.query("select * from file_change where task_id = :taskId order by created_at, id",
                 new MapSqlParameterSource("taskId", taskId), mapper());
     }
 
+    /**
+     * Counts file changes already recorded for a run.
+     */
     public long countByRun(UUID runId) {
         return jdbc.queryForObject("select count(*) from file_change where run_id = :runId",
                 new MapSqlParameterSource("runId", runId), Long.class);

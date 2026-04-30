@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+/**
+ * REST API for task creation, lookup, starting, and cancellation.
+ */
 @RestController
 @RequestMapping("/api/tasks")
 public class TaskController {
@@ -20,30 +23,47 @@ public class TaskController {
     private final AgentRunService runService;
     private final AgentLoopExecutor loopExecutor;
 
+    /**
+     * Creates a task controller with task and run orchestration services.
+     */
     public TaskController(TaskService taskService, AgentRunService runService, AgentLoopExecutor loopExecutor) {
         this.taskService = taskService;
         this.runService = runService;
         this.loopExecutor = loopExecutor;
     }
 
+    /**
+     * Creates a task in {@code CREATED} status.
+     */
     @PostMapping
     CodingTask create(@Valid @RequestBody CreateTaskRequest request) {
         return taskService.create(request);
     }
 
+    /**
+     * Fetches the current task state.
+     */
     @GetMapping("/{taskId}")
     CodingTask get(@PathVariable UUID taskId) {
         return taskService.getRequired(taskId);
     }
 
+    /**
+     * Starts a synchronous Phase 1 agent run for the task.
+     */
     @PostMapping("/{taskId}/start")
     AgentRun start(@PathVariable UUID taskId) {
         var task = taskService.getRequired(taskId);
         var run = runService.createRun(task);
+        // Phase 1 runs inline so API clients can immediately observe the final
+        // state or a WAITING_APPROVAL pause without a background worker.
         loopExecutor.execute(run.id());
         return runService.getRequired(run.id());
     }
 
+    /**
+     * Cancels a task from the API surface.
+     */
     @PostMapping("/{taskId}/cancel")
     CodingTask cancel(@PathVariable UUID taskId) {
         return taskService.cancel(taskId);

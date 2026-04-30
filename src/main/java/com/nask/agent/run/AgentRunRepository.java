@@ -12,22 +12,30 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for agent run rows.
+ */
 @Repository
 public class AgentRunRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository backed by JDBC and JSON helpers.
+     */
     public AgentRunRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Inserts a new run.
+     */
     public AgentRun insert(AgentRun run) {
         jdbc.update("""
                 insert into agent_run (id, task_id, agent_mode, status, started_at, finished_at, failure_reason, runtime_metadata)
@@ -36,16 +44,25 @@ public class AgentRunRepository {
         return run;
     }
 
+    /**
+     * Looks up a run by id.
+     */
     public Optional<AgentRun> findById(UUID id) {
         return jdbc.query("select * from agent_run where id = :id", new MapSqlParameterSource("id", id), mapper())
                 .stream().findFirst();
     }
 
+    /**
+     * Lists all runs for a task, newest first.
+     */
     public List<AgentRun> findByTask(UUID taskId) {
         return jdbc.query("select * from agent_run where task_id = :taskId order by started_at desc",
                 new MapSqlParameterSource("taskId", taskId), mapper());
     }
 
+    /**
+     * Updates the run lifecycle and stamps {@code finished_at} for terminal states.
+     */
     public void updateStatus(UUID id, Domain.AgentRunStatus status, String failureReason) {
         jdbc.update("""
                 update agent_run

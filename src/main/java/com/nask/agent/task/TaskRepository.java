@@ -15,14 +15,23 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for task rows.
+ */
 @Repository
 public class TaskRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
+    /**
+     * Creates a repository backed by named-parameter JDBC.
+     */
     public TaskRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Inserts a new task.
+     */
     public CodingTask insert(CodingTask task) {
         jdbc.update("""
                 insert into task (id, workspace_id, title, user_request, status, created_at, updated_at)
@@ -31,11 +40,17 @@ public class TaskRepository {
         return task;
     }
 
+    /**
+     * Finds a task by id.
+     */
     public Optional<CodingTask> findById(UUID id) {
         return jdbc.query("select * from task where id = :id", new MapSqlParameterSource("id", id), mapper())
                 .stream().findFirst();
     }
 
+    /**
+     * Updates task status and refreshes {@code updated_at}.
+     */
     public void updateStatus(UUID id, Domain.TaskStatus status) {
         jdbc.update("update task set status = :status, updated_at = :updatedAt where id = :id",
                 new MapSqlParameterSource()

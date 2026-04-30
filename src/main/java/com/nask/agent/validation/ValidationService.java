@@ -9,16 +9,25 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Records validation outcomes and mirrors them into the audit log.
+ */
 @Service
 public class ValidationService {
     private final ValidationRepository repository;
     private final AuditService auditService;
 
+    /**
+     * Creates a validation service.
+     */
     public ValidationService(ValidationRepository repository, AuditService auditService) {
         this.repository = repository;
         this.auditService = auditService;
     }
 
+    /**
+     * Persists a validation result and appends start/completion audit events.
+     */
     public ValidationResultRecord record(UUID taskId, UUID runId, UUID stepId, UUID commandId,
                                          Domain.ValidationType type, boolean success, String summary) {
         auditService.append(AuditEventDraft.info(taskId, runId, stepId, Domain.AuditEventType.ValidationStarted,
@@ -33,6 +42,9 @@ public class ValidationService {
         return result;
     }
 
+    /**
+     * Returns validation results for a task.
+     */
     public List<ValidationResultRecord> findByTask(UUID taskId) {
         return repository.findByTask(taskId);
     }

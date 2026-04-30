@@ -15,16 +15,25 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for append-only audit events.
+ */
 @Repository
 public class AuditRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository backed by JDBC and JSON helpers.
+     */
     public AuditRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Appends an audit event and returns its id.
+     */
     public UUID insert(AuditEvent event) {
         jdbc.update("""
                 insert into audit_event (
@@ -65,11 +74,17 @@ public class AuditRepository {
         return event.id();
     }
 
+    /**
+     * Lists audit events for a task in chronological order.
+     */
     public List<AuditEvent> findByTask(UUID taskId) {
         return jdbc.query("select * from audit_event where task_id = :taskId order by occurred_at, id",
                 new MapSqlParameterSource("taskId", taskId), mapper());
     }
 
+    /**
+     * Lists audit events for a run in chronological order.
+     */
     public List<AuditEvent> findByRun(UUID runId) {
         return jdbc.query("select * from audit_event where run_id = :runId order by occurred_at, id",
                 new MapSqlParameterSource("runId", runId), mapper());
@@ -106,6 +121,9 @@ public class AuditRepository {
                 json.toMap(rs.getString("metadata")));
     }
 
+    /**
+     * Converts a service-layer draft into a persistent event.
+     */
     public static AuditEvent fromDraft(UUID id, Instant now, AuditEventDraft draft) {
         return new AuditEvent(
                 id,

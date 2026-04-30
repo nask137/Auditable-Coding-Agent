@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Persistent output of a tool call.
+ */
 public record ToolResultRecord(
         UUID id,
         UUID toolCallId,

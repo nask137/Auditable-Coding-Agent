@@ -13,6 +13,9 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Builds final run reports from model output, file changes, and audit events.
+ */
 @Service
 public class ReportService {
     private final TaskReportRepository repository;
@@ -20,6 +23,9 @@ public class ReportService {
     private final FileChangeRepository fileChangeRepository;
     private final AuditService auditService;
 
+    /**
+     * Creates a report service.
+     */
     public ReportService(TaskReportRepository repository, LlmGateway llmGateway,
                          FileChangeRepository fileChangeRepository, AuditService auditService) {
         this.repository = repository;
@@ -28,10 +34,15 @@ public class ReportService {
         this.auditService = auditService;
     }
 
+    /**
+     * Generates and persists a Markdown report for the given task/run.
+     */
     public TaskReport generate(CodingTask task, UUID runId, String resultSummary) {
         FinalReportDraft draft = llmGateway.generateReport(new ReportContext(task.id(), runId, task.userRequest(), resultSummary));
         var changes = fileChangeRepository.findByTask(task.id());
         var events = auditService.eventsForTask(task.id());
+        // The LLM drafts the narrative, while deterministic sections append the
+        // exact file-change and audit trails stored by the runtime.
         var content = draft.markdown()
                 + "\n## File Changes\n\n"
                 + changes.stream().map(change -> "- `%s` %s".formatted(change.path(), change.changeType()))
@@ -42,6 +53,9 @@ public class ReportService {
         return repository.insert(new TaskReport(UUID.randomUUID(), task.id(), runId, content, Instant.now()));
     }
 
+    /**
+     * Loads the latest report or raises a REST-friendly 404 exception.
+     */
     public TaskReport getLatestRequired(UUID taskId) {
         return repository.findLatestByTask(taskId).orElseThrow(() ->
                 new ApiException(HttpStatus.NOT_FOUND, "REPORT_NOT_FOUND", "Report not found for task: " + taskId));

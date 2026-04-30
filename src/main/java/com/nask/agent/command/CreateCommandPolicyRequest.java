@@ -5,6 +5,9 @@ import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
 
+/**
+ * Request body for adding a workspace command policy.
+ */
 public record CreateCommandPolicyRequest(
         @NotBlank String policyType,
         @NotBlank String executable,

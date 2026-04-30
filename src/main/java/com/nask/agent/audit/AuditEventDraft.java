@@ -6,6 +6,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * In-memory draft used by services before an audit event receives id/timestamp.
+ */
 public record AuditEventDraft(
         UUID taskId,
         UUID runId,
@@ -29,6 +32,9 @@ public record AuditEventDraft(
         String errorMessage,
         Map<String, Object> metadata) {
 
+    /**
+     * Convenience factory for successful informational audit events.
+     */
     public static AuditEventDraft info(UUID taskId, UUID runId, UUID stepId, Domain.AuditEventType eventType,
                                        Domain.AuditActor actor, String inputSummary, String outputSummary) {
         return new AuditEventDraft(taskId, runId, stepId, null, eventType, actor, Domain.AuditLevel.INFO,

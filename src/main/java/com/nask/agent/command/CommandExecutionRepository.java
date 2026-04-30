@@ -15,16 +15,25 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for command execution records.
+ */
 @Repository
 public class CommandExecutionRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository backed by JDBC and JSON helpers.
+     */
     public CommandExecutionRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Inserts a command execution row before the process starts or waits.
+     */
     public CommandExecution insert(CommandExecution command) {
         jdbc.update("""
                 insert into command_execution (
@@ -40,6 +49,9 @@ public class CommandExecutionRepository {
         return command;
     }
 
+    /**
+     * Completes a command execution with status, exit code, and output summary.
+     */
     public void complete(UUID id, String status, Integer exitCode, String outputSummary) {
         jdbc.update("""
                 update command_execution
@@ -53,6 +65,9 @@ public class CommandExecutionRepository {
                 .addValue("finishedAt", ts(Instant.now())));
     }
 
+    /**
+     * Lists commands requested by a task in creation order.
+     */
     public List<CommandExecution> findByTask(UUID taskId) {
         return jdbc.query("select * from command_execution where task_id = :taskId order by created_at, id",
                 new MapSqlParameterSource("taskId", taskId), mapper());

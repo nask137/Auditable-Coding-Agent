@@ -13,14 +13,23 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for validation results.
+ */
 @Repository
 public class ValidationRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
+    /**
+     * Creates a repository backed by named-parameter JDBC.
+     */
     public ValidationRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Inserts a validation result.
+     */
     public ValidationResultRecord insert(ValidationResultRecord result) {
         jdbc.update("""
                 insert into validation_result (id, task_id, run_id, step_id, command_id, validation_type, success, summary, created_at)
@@ -38,6 +47,9 @@ public class ValidationRepository {
         return result;
     }
 
+    /**
+     * Lists validation results for a task.
+     */
     public List<ValidationResultRecord> findByTask(UUID taskId) {
         return jdbc.query("select * from validation_result where task_id = :taskId order by created_at",
                 new MapSqlParameterSource("taskId", taskId), mapper());

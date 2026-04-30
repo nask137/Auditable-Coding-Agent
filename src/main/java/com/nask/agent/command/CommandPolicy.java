@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Workspace-scoped policy used to classify a command before execution.
+ */
 public record CommandPolicy(
         UUID id,
         UUID workspaceId,

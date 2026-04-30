@@ -14,14 +14,23 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for agent actions.
+ */
 @Repository
 public class AgentActionRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
+    /**
+     * Creates a repository backed by named-parameter JDBC.
+     */
     public AgentActionRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Inserts an action in its initial lifecycle state.
+     */
     public AgentAction insert(AgentAction action) {
         jdbc.update("""
                 insert into agent_action (id, step_id, action_type, reason, risk_level, status, created_at)
@@ -37,6 +46,9 @@ public class AgentActionRepository {
         return action;
     }
 
+    /**
+     * Updates an action status.
+     */
     public void updateStatus(UUID actionId, Domain.ActionStatus status) {
         jdbc.update("update agent_action set status = :status where id = :id",
                 new MapSqlParameterSource().addValue("id", actionId).addValue("status", status.name()));

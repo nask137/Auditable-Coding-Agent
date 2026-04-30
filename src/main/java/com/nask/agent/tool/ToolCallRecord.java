@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Persistent record for a tool invocation attempt.
+ */
 public record ToolCallRecord(
         UUID id,
         UUID actionId,

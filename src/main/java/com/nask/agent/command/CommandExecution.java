@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Persisted shell command attempt and its final output metadata.
+ */
 public record CommandExecution(
         UUID id,
         UUID workspaceId,

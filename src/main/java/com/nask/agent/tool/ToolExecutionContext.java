@@ -4,6 +4,9 @@ import com.nask.agent.workspace.Workspace;
 
 import java.util.UUID;
 
+/**
+ * Correlation context passed to all tool services.
+ */
 public record ToolExecutionContext(
         UUID taskId,
         UUID runId,

@@ -17,16 +17,25 @@ import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
 
+/**
+ * JDBC repository for plans and plan items.
+ */
 @Repository
 public class PlanRepository {
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
+    /**
+     * Creates a repository backed by JDBC and JSON helpers.
+     */
     public PlanRepository(NamedParameterJdbcTemplate jdbc, JsonSupport json) {
         this.jdbc = jdbc;
         this.json = json;
     }
 
+    /**
+     * Inserts the plan header row.
+     */
     public Plan insertPlan(Plan plan) {
         jdbc.update("""
                 insert into plan (id, task_id, run_id, status, created_at, updated_at)
@@ -41,6 +50,9 @@ public class PlanRepository {
         return plan;
     }
 
+    /**
+     * Inserts an ordered plan item.
+     */
     public PlanItem insertItem(PlanItem item) {
         jdbc.update("""
                 insert into plan_item (id, plan_id, description, status, related_files, notes, order_index, created_at, updated_at)
@@ -58,16 +70,25 @@ public class PlanRepository {
         return item;
     }
 
+    /**
+     * Finds the newest plan attached to a run.
+     */
     public Optional<Plan> findByRun(UUID runId) {
         return jdbc.query("select * from plan where run_id = :runId order by created_at desc limit 1",
                 new MapSqlParameterSource("runId", runId), planMapper()).stream().findFirst();
     }
 
+    /**
+     * Lists all items for a plan in execution order.
+     */
     public List<PlanItem> findItems(UUID planId) {
         return jdbc.query("select * from plan_item where plan_id = :planId order by order_index",
                 new MapSqlParameterSource("planId", planId), itemMapper());
     }
 
+    /**
+     * Returns the next pending item according to {@code order_index}.
+     */
     public Optional<PlanItem> findNextPendingItem(UUID planId) {
         return jdbc.query("""
                         select * from plan_item
@@ -80,6 +101,9 @@ public class PlanRepository {
                 itemMapper()).stream().findFirst();
     }
 
+    /**
+     * Updates a plan item status and refreshes {@code updated_at}.
+     */
     public void updateItemStatus(UUID itemId, Domain.PlanItemStatus status) {
         jdbc.update("update plan_item set status = :status, updated_at = :updatedAt where id = :id",
                 new MapSqlParameterSource()
@@ -88,6 +112,9 @@ public class PlanRepository {
                         .addValue("updatedAt", ts(Instant.now())));
     }
 
+    /**
+     * Updates a plan status and refreshes {@code updated_at}.
+     */
     public void updatePlanStatus(UUID planId, Domain.PlanStatus status) {
         jdbc.update("update plan set status = :status, updated_at = :updatedAt where id = :id",
                 new MapSqlParameterSource()
