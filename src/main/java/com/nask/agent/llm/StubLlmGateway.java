@@ -1,0 +1,88 @@
+package com.nask.agent.llm;
+
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+@Component
+public class StubLlmGateway implements LlmGateway {
+    @Override
+    public TaskUnderstanding understandTask(TaskContext context) {
+        return new TaskUnderstanding(
+                context.userRequest(),
+                inferType(context.userRequest()),
+                List.of("Only operate inside the trusted workspace", "Keep changes small and auditable"),
+                searchHints(context.userRequest()));
+    }
+
+    @Override
+    public PlanDraft createPlan(PlanningContext context) {
+        return new PlanDraft(List.of(
+                new PlanDraft.Item("Inspect workspace files", List.of(), "List files and capture workspace shape"),
+                new PlanDraft.Item("Create an auditable task note", List.of("AGENT_TASK_NOTE.md"), "Stub implementation records task intent without changing source code"),
+                new PlanDraft.Item("Validate with an approved command if available", List.of(), "Validation is routed through command policy")));
+    }
+
+    @Override
+    public AgentDecision decideNextAction(ExecutionContext context) {
+        var description = context.currentItem().description().toLowerCase(Locale.ROOT);
+        if (description.contains("inspect")) {
+            return new AgentDecision(context.currentItem().id(), List.of(
+                    new AgentDecision.Action("LIST_FILES", "Understand workspace structure", Map.of("path", ".", "maxDepth", 4))));
+        }
+        if (description.contains("note")) {
+            return new AgentDecision(context.currentItem().id(), List.of(
+                    new AgentDecision.Action("CREATE_FILE", "Record the auditable task intent for the MVP stub loop",
+                            Map.of("path", "AGENT_TASK_NOTE.md", "content", "# Agent Task Note\n\nThis file was created by the phase 1 StubLlmGateway to prove the audited file-change loop.\n"))));
+        }
+        return new AgentDecision(context.currentItem().id(), List.of());
+    }
+
+    @Override
+    public ValidationDecision suggestValidation(ValidationContext context) {
+        return new ValidationDecision(true, List.of("java", "-version"), "Run a portable JVM smoke validation command");
+    }
+
+    @Override
+    public FinalReportDraft generateReport(ReportContext context) {
+        return new FinalReportDraft("""
+                # Agent Run Report
+
+                ## Task
+
+                %s
+
+                ## Result
+
+                %s
+                """.formatted(context.taskSummary(), context.resultSummary()));
+    }
+
+    private String inferType(String userRequest) {
+        var lower = userRequest.toLowerCase(Locale.ROOT);
+        if (lower.contains("bug") || lower.contains("fix") || lower.contains("修复")) {
+            return "BUG_FIX";
+        }
+        if (lower.contains("test") || lower.contains("测试")) {
+            return "TEST";
+        }
+        return "CODE_EDIT";
+    }
+
+    private List<String> searchHints(String userRequest) {
+        var hints = new ArrayList<String>();
+        for (var token : userRequest.split("\\s+")) {
+            var normalized = token.replaceAll("[^A-Za-z0-9_.$-]", "");
+            if (normalized.length() >= 4) {
+                hints.add(normalized);
+            }
+            if (hints.size() >= 5) {
+                break;
+            }
+        }
+        return hints;
+    }
+}
