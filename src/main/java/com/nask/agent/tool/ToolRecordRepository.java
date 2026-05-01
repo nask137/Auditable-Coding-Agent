@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
@@ -83,5 +84,32 @@ public class ToolRecordRepository {
                 .addValue("metadata", json.toJson(result.metadata()))
                 .addValue("createdAt", ts(result.createdAt())));
         return result;
+    }
+
+    /**
+     * Finds the latest tool call for an action and tool name.
+     */
+    public Optional<ToolCallRecord> findLatestCall(UUID actionId, String toolName) {
+        return jdbc.query("""
+                select *
+                  from tool_call
+                 where action_id = :actionId
+                   and tool_name = :toolName
+                 order by started_at desc, id desc
+                 limit 1
+                """, new MapSqlParameterSource()
+                .addValue("actionId", actionId)
+                .addValue("toolName", toolName), (rs, rowNum) -> new ToolCallRecord(
+                rs.getObject("id", UUID.class),
+                rs.getObject("action_id", UUID.class),
+                rs.getString("tool_name"),
+                rs.getString("permission_level"),
+                rs.getString("input_summary"),
+                json.toMap(rs.getString("input_payload")),
+                rs.getString("status"),
+                rs.getObject("started_at", java.time.OffsetDateTime.class).toInstant(),
+                rs.getObject("finished_at", java.time.OffsetDateTime.class) == null
+                        ? null : rs.getObject("finished_at", java.time.OffsetDateTime.class).toInstant()
+        )).stream().findFirst();
     }
 }

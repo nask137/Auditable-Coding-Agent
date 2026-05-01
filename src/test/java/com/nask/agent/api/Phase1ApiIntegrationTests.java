@@ -25,7 +25,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.flyway.enabled=false")
+        properties = {
+                "spring.flyway.enabled=false",
+                "agent.llm.provider=stub",
+                "agent.llm.api-key="
+        })
 class Phase1ApiIntegrationTests {
     Path workspaceDir;
 
@@ -111,6 +115,81 @@ class Phase1ApiIntegrationTests {
         var report = getMap("/api/tasks/" + taskId + "/report");
         assertThat(report.get("contentMd").toString()).contains("Validation passed");
         assertThat(report.get("contentMd").toString()).contains("AGENT_TASK_NOTE.md");
+    }
+
+    @Test
+    void approvingValidationCommandResumesWithoutReplanning() throws Exception {
+        Files.writeString(workspaceDir.resolve("README.md"), "approval resume workspace");
+
+        var workspace = post("/api/workspaces", Map.of(
+                "name", "approval-resume",
+                "rootPath", workspaceDir.toString(),
+                "trusted", true));
+        var workspaceId = workspace.get("id").toString();
+
+        var task = post("/api/tasks", Map.of(
+                "workspaceId", workspaceId,
+                "title", "approval resume task",
+                "userRequest", "create an audited note and validate"));
+        var taskId = task.get("id").toString();
+
+        var run = post("/api/tasks/" + taskId + "/start", null);
+        var runId = run.get("id").toString();
+
+        assertThat(run.get("status")).isEqualTo("WAITING_APPROVAL");
+        assertThat(jdbc.queryForObject("select count(*) from plan where run_id = ?", Integer.class, java.util.UUID.fromString(runId)))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from command_execution where run_id = ?", Integer.class, java.util.UUID.fromString(runId)))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
+
+        var approvals = getList("/api/approvals?status=PENDING");
+        assertThat(approvals).hasSize(1);
+        var approvalId = approvals.getFirst().get("id").toString();
+
+        post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "test"));
+
+        var completedRun = getMap("/api/runs/" + runId);
+        assertThat(completedRun.get("status")).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("select count(*) from plan where run_id = ?", Integer.class, java.util.UUID.fromString(runId)))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from command_execution where run_id = ?", Integer.class, java.util.UUID.fromString(runId)))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("select status from command_execution where run_id = ?", String.class, java.util.UUID.fromString(runId)))
+                .isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("""
+                select tc.status
+                  from tool_call tc
+                  join agent_action aa on aa.id = tc.action_id
+                  join agent_step astep on astep.id = aa.step_id
+                 where astep.run_id = ?
+                   and tc.tool_name = 'run_command'
+                """, String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from tool_result tr
+                  join tool_call tc on tc.id = tr.tool_call_id
+                  join agent_action aa on aa.id = tc.action_id
+                  join agent_step astep on astep.id = aa.step_id
+                 where astep.run_id = ?
+                   and tc.tool_name = 'run_command'
+                   and tr.success = true
+                """, Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("select approval_id is not null from command_execution where run_id = ?", Boolean.class, java.util.UUID.fromString(runId)))
+                .isTrue();
+
+        var events = getList("/api/tasks/" + taskId + "/events");
+        assertThat(events.stream().filter(event -> "PlanCreated".equals(event.get("eventType"))).count())
+                .isEqualTo(1);
+        assertThat(events.stream()
+                .filter(event -> "StepStarted".equals(event.get("eventType")))
+                .filter(event -> "UNDERSTAND_TASK".equals(event.get("outputSummary")))
+                .count()).isEqualTo(1);
     }
 
     private Map<String, Object> post(String path, Object body) {

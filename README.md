@@ -2,7 +2,7 @@
 
 Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服务。项目目标不是做一个只会聊天的 Agent，而是把编码任务拆成可追踪的步骤：理解任务、检查 workspace、生成计划、调用受控工具、记录文件变更、执行验证命令、处理审批，并生成任务报告。
 
-当前代码对应“阶段 1：单 Agent 执行闭环”MVP。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、固定 Agent Loop、基础文件工具、命令审批、审计事件、任务报告和轻量 CLI。LLM 侧目前使用 `StubLlmGateway`，用于验证 Runtime、权限、审计和报告闭环，尚未接入真实模型。
+当前代码对应“阶段 1：单 Agent 执行闭环”MVP。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、固定 Agent Loop、基础文件工具、命令审批、审计事件、任务报告和轻量 CLI。LLM 侧默认使用 `StubLlmGateway` 验证 Runtime 闭环，也可以通过 HTTP 网关接入 DeepSeek/OpenAI-compatible 模型，让模型只输出结构化任务理解、计划和工具动作意图。
 
 ## 当前能力
 
@@ -115,6 +115,19 @@ agent.loop.max-consecutive-failures=3
 agent.command.timeout-seconds=120
 agent.file.max-read-bytes=200000
 ```
+
+LLM 默认 provider 是 `stub`。接入 DeepSeek V4 Pro 时配置：
+
+```powershell
+$env:AGENT_LLM_PROVIDER='http'
+$env:AGENT_LLM_BASE_URL='https://api.deepseek.com'
+$env:AGENT_LLM_API_KEY='<your-api-key>'
+$env:AGENT_LLM_MODEL='deepseek-v4-pro'
+$env:AGENT_LLM_THINKING_ENABLED='false'
+$env:AGENT_LLM_REASONING_EFFORT='high'
+```
+
+HTTP 网关调用 `/chat/completions`，使用 JSON output mode。DeepSeek thinking mode 默认显式启用，可通过 `AGENT_LLM_THINKING_ENABLED=false` 关闭，或用 `AGENT_LLM_REASONING_EFFORT=high|max` 调整 effort。模型只返回结构化意图，实际文件和命令操作仍经过 Runtime 校验、审批和审计。
 
 ## 启动服务
 
@@ -303,7 +316,7 @@ mvn test
 
 ## 当前限制
 
-- 当前 LLM 实现是 `StubLlmGateway`，固定生成三步计划，不具备真实代码理解和自动修复能力。
+- 默认 LLM 实现是 `StubLlmGateway`，固定生成三步计划；配置 `AGENT_LLM_PROVIDER=http` 后可使用真实模型，但模型输出仍受结构化解析、Bean Validation 和动作白名单约束。
 - 阶段 1 Agent Loop 是同步执行；后台任务队列、WebSocket/SSE 推送和多实例协调尚未实现。
 - CLI 输出原始 JSON，尚未做表格化、分页、高亮或交互式审批。
 - 目前没有 Web 控制台、IDE 插件、多 Agent、长期记忆、RAG 或工作流 DSL。
@@ -322,4 +335,4 @@ mvn test
 阶段 6：多 Agent、插件化与产品化
 ```
 
-短期最重要的下一步是替换 `StubLlmGateway`，接入真实模型，并在保持 Runtime 权限、审批和审计约束不变的前提下，让模型输出结构化任务理解、计划和工具动作。
+短期最重要的下一步是扩展失败恢复和事件流模型，并在真实模型输出被 Runtime 拒绝时支持重新规划或请求用户介入。

@@ -2,7 +2,9 @@ package com.nask.agent.step;
 
 import com.nask.agent.audit.AuditEventDraft;
 import com.nask.agent.audit.AuditService;
+import com.nask.agent.common.ApiException;
 import com.nask.agent.common.Domain;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -47,6 +49,15 @@ public class AgentStepService {
     }
 
     /**
+     * Pauses a step until a related approval request is resolved.
+     */
+    public void markWaitingApproval(UUID taskId, UUID runId, AgentStep step, String outputSummary) {
+        repository.markWaitingApproval(step.id(), outputSummary);
+        auditService.append(AuditEventDraft.info(taskId, runId, step.id(), Domain.AuditEventType.AgentRunPaused,
+                Domain.AuditActor.RUNTIME, step.stepType(), outputSummary));
+    }
+
+    /**
      * Fails a step and appends an error audit event.
      */
     public void fail(UUID taskId, UUID runId, AgentStep step, String outputSummary) {
@@ -62,5 +73,13 @@ public class AgentStepService {
      */
     public List<AgentStep> findByRun(UUID runId) {
         return repository.findByRun(runId);
+    }
+
+    /**
+     * Loads a step or raises a REST-friendly 404 exception.
+     */
+    public AgentStep getRequired(UUID id) {
+        return repository.findById(id).orElseThrow(() ->
+                new ApiException(HttpStatus.NOT_FOUND, "STEP_NOT_FOUND", "AgentStep not found: " + id));
     }
 }
