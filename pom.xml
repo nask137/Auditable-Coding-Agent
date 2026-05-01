@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.nask</groupId>
-    <artifactId>Agent</artifactId>
+    <artifactId>auditable-coding-agent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>Agent</name>
-    <description>Agent</description>
+    <name>Auditable Coding Agent</name>
+    <description>Auditable local coding agent runtime</description>
     <url/>
     <licenses>
         <license/>
