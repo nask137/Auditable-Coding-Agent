@@ -72,18 +72,18 @@ mvn -version
 项目默认使用 Java 25。后端默认连接本地 PostgreSQL：
 
 ```text
-jdbc:postgresql://localhost:5432/agent
-username: codex
-password: codex
+jdbc:postgresql://localhost:5432/auditable_agent
+username: username
+password: password
 ```
 
 可以用 Docker 启动一个本地数据库：
 
 ```powershell
 docker run --name agent-postgres `
-  -e POSTGRES_DB=agent `
-  -e POSTGRES_USER=codex `
-  -e POSTGRES_PASSWORD=codex `
+  -e POSTGRES_DB=auditable_agent `
+  -e POSTGRES_USER=username `
+  -e POSTGRES_PASSWORD=password `
   -p 5432:5432 `
   -d postgres:16
 ```
@@ -99,9 +99,9 @@ docker start agent-postgres
 默认配置位于 `src/main/resources/application.properties`。常用环境变量：
 
 ```powershell
-$env:AGENT_DATASOURCE_URL='jdbc:postgresql://localhost:5432/agent'
-$env:AGENT_DATASOURCE_USERNAME='codex'
-$env:AGENT_DATASOURCE_PASSWORD='codex'
+$env:AGENT_DATASOURCE_URL='jdbc:postgresql://localhost:5432/auditable_agent'
+$env:AGENT_DATASOURCE_USERNAME='username'
+$env:AGENT_DATASOURCE_PASSWORD='password'
 ```
 
 主要运行时限制：
