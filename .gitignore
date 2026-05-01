@@ -33,3 +33,6 @@ build/
 
 ### ENVIRONMENT ###
 .env
+
+### properties ###
+application-dev.properties
