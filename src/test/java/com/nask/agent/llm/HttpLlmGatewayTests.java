@@ -1,0 +1,59 @@
+package com.nask.agent.llm;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nask.agent.audit.AuditService;
+import com.nask.agent.plan.PlanItem;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class HttpLlmGatewayTests {
+    private final StructuredLlmOutputValidator validator = new StructuredLlmOutputValidator(
+            jakarta.validation.Validation.buildDefaultValidatorFactory().getValidator());
+
+    @Test
+    void parsesAndValidatesStructuredDecision() {
+        var auditService = mock(AuditService.class);
+        when(auditService.append(any())).thenReturn(UUID.randomUUID());
+        ChatCompletionClient client = prompt -> new ChatCompletionResult("deepseek-v4-pro",
+                "{\"planItemId\":\"00000000-0000-0000-0000-000000000001\",\"actions\":[{\"type\":\"SEARCH_TEXT\",\"reason\":\"Find usage\",\"input\":{\"query\":\"LlmGateway\"}}]}",
+                "stop", 1, 2, 3);
+        var gateway = new HttpLlmGateway(new LlmPromptFactory(), client, new ObjectMapper(), validator, auditService);
+        var item = new PlanItem(UUID.fromString("00000000-0000-0000-0000-000000000001"), UUID.randomUUID(),
+                "Search code", "PENDING", List.of(), "notes", 1, Instant.now(), Instant.now());
+
+        var decision = gateway.decideNextAction(new ExecutionContext(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                item, List.of()));
+
+        assertThat(decision.actions()).hasSize(1);
+        assertThat(decision.actions().getFirst().type()).isEqualTo("SEARCH_TEXT");
+        verify(auditService, times(2)).append(any());
+    }
+
+    @Test
+    void rejectsUnsupportedStructuredDecisionBeforeRuntimeToolExecution() {
+        var auditService = mock(AuditService.class);
+        when(auditService.append(any())).thenReturn(UUID.randomUUID());
+        ChatCompletionClient client = prompt -> new ChatCompletionResult("deepseek-v4-pro",
+                "{\"planItemId\":\"00000000-0000-0000-0000-000000000001\",\"actions\":[{\"type\":\"RUN_COMMAND\",\"reason\":\"Run tests\",\"input\":{\"executable\":\"mvn\"}}]}",
+                "stop", 1, 2, 3);
+        var gateway = new HttpLlmGateway(new LlmPromptFactory(), client, new ObjectMapper(), validator, auditService);
+        var item = new PlanItem(UUID.fromString("00000000-0000-0000-0000-000000000001"), UUID.randomUUID(),
+                "Run tests", "PENDING", List.of(), "notes", 1, Instant.now(), Instant.now());
+
+        assertThatThrownBy(() -> gateway.decideNextAction(new ExecutionContext(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), item, List.of())))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("Unsupported action type");
+    }
+}

@@ -1,6 +1,7 @@
 package com.nask.agent.run;
 
 import com.nask.agent.action.AgentActionService;
+import com.nask.agent.command.CommandExecutionRepository;
 import com.nask.agent.command.CommandToolService;
 import com.nask.agent.common.AgentSettings;
 import com.nask.agent.common.Domain;
@@ -20,8 +21,9 @@ import com.nask.agent.tool.ToolExecutionContext;
 import com.nask.agent.tool.ToolExecutionResult;
 import com.nask.agent.validation.ValidationService;
 import com.nask.agent.workspace.WorkspaceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,8 @@ import java.util.UUID;
  */
 @Service
 public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
+    private static final Logger log = LoggerFactory.getLogger(DefaultAgentLoopExecutor.class);
+
     private final AgentRunService runService;
     private final TaskService taskService;
     private final WorkspaceService workspaceService;
@@ -51,6 +55,7 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
     private final ValidationService validationService;
     private final AgentSettings settings;
     private final FileChangeRepository fileChangeRepository;
+    private final CommandExecutionRepository commandExecutionRepository;
 
     /**
      * Wires the executor to all domain services that own persistence and policy.
@@ -61,7 +66,8 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                                     LlmGateway llmGateway, FileToolService fileToolService,
                                     ReportService reportService, CommandToolService commandToolService,
                                     ValidationService validationService, AgentSettings settings,
-                                    FileChangeRepository fileChangeRepository) {
+                                    FileChangeRepository fileChangeRepository,
+                                    CommandExecutionRepository commandExecutionRepository) {
         this.runService = runService;
         this.taskService = taskService;
         this.workspaceService = workspaceService;
@@ -75,6 +81,7 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
         this.validationService = validationService;
         this.settings = settings;
         this.fileChangeRepository = fileChangeRepository;
+        this.commandExecutionRepository = commandExecutionRepository;
     }
 
     /**
@@ -85,25 +92,34 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
      * approves, after which the caller can invoke the loop again.</p>
      */
     @Override
-    @Transactional
     public void execute(UUID runId) {
+        log.info("Starting agent loop execution for run {}", runId);
         var run = runService.getRequired(runId);
         // Avoid replaying terminal or paused runs. This keeps repeated API calls
         // idempotent from the perspective of stored state.
         if (!Domain.AgentRunStatus.RUNNING.name().equals(run.status())) {
+            log.info("Skipping agent loop execution for run {} because status is {}", run.id(), run.status());
             return;
         }
         var task = taskService.getRequired(run.taskId());
         var workspace = workspaceService.getRequired(task.workspaceId());
+        log.info("Loaded agent run {} for task {} in workspace {}", run.id(), task.id(), workspace.id());
         workspaceService.touch(workspace.id());
 
         try {
+            if (resumeApprovedPauseIfPresent(task, run, workspace)) {
+                return;
+            }
+
             // Phase 1 keeps model interactions explicit and step-scoped so each
             // model-derived artifact can be correlated with a run timeline entry.
+            log.debug("Run {} starting task understanding step", run.id());
             var understandStep = stepService.start(task.id(), run.id(), null, Domain.StepType.UNDERSTAND_TASK, "Understand task");
             var understanding = llmGateway.understandTask(new TaskContext(task.id(), workspace.id(), task.userRequest()));
             stepService.complete(task.id(), run.id(), understandStep, understanding.summary());
+            log.debug("Run {} completed task understanding: {}", run.id(), understanding.summary());
 
+            log.debug("Run {} starting workspace inspection", run.id());
             var inspectStep = stepService.start(task.id(), run.id(), null, Domain.StepType.INSPECT_WORKSPACE, "Inspect workspace");
             var inspectAction = actionService.create(inspectStep.id(), Domain.ActionType.CALL_TOOL,
                     "List workspace files for planning", Domain.RiskLevel.LOW);
@@ -112,7 +128,8 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             if (listed.waitingApproval()) {
                 // Approval pauses are not failures: the run status has already
                 // been changed by the permission layer, so the loop simply exits.
-                stepService.complete(task.id(), run.id(), inspectStep, listed.summary());
+                stepService.markWaitingApproval(task.id(), run.id(), inspectStep, listed.summary());
+                log.info("Run {} paused during workspace inspection awaiting approval: {}", run.id(), listed.summary());
                 return;
             }
             if (listed.blocked()) {
@@ -121,15 +138,19 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                 stepService.fail(task.id(), run.id(), inspectStep, listed.summary());
                 runService.fail(run.id(), task.id(), listed.summary());
                 reportService.generate(task, run.id(), "Failed during workspace inspection: " + listed.summary());
+                log.warn("Run {} blocked during workspace inspection: {}", run.id(), listed.summary());
                 return;
             }
             stepService.complete(task.id(), run.id(), inspectStep, listed.summary());
+            log.debug("Run {} completed workspace inspection: {}", run.id(), listed.summary());
 
             var observedFiles = observedFiles(listed.payload());
+            log.info("Run {} observed {} workspace files for planning", run.id(), observedFiles.size());
             var planStep = stepService.start(task.id(), run.id(), null, Domain.StepType.CREATE_PLAN, "Create plan");
             var plan = planService.create(task.id(), run.id(), llmGateway.createPlan(
                     new PlanningContext(task.id(), run.id(), understanding, observedFiles)));
             stepService.complete(task.id(), run.id(), planStep, "Created " + plan.items().size() + " plan items");
+            log.info("Run {} created plan {} with {} items", run.id(), plan.plan().id(), plan.items().size());
 
             var executedSteps = 0;
             PlanItem next;
@@ -139,41 +160,114 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                     // runtime guard prevents an unbounded loop even if planning did
                     // not respect expected limits.
                     runService.fail(run.id(), task.id(), "Maximum agent step count exceeded");
+                    log.warn("Run {} exceeded maximum agent step count {}", run.id(), settings.maxSteps());
                     return;
                 }
+                log.info("Run {} executing plan item {} ({}/{})", run.id(), next.id(), executedSteps, settings.maxSteps());
                 var result = executePlanItem(task.id(), run.id(), workspace, next, observedFiles);
                 if (result.waitingApproval()) {
                     // The current plan item remains in progress so the timeline
                     // shows exactly where user approval interrupted execution.
+                    log.info("Run {} paused while executing plan item {} awaiting approval: {}", run.id(), next.id(), result.summary());
                     return;
                 }
                 if (result.blocked()) {
                     planService.updateItemStatus(next.id(), Domain.PlanItemStatus.FAILED);
                     runService.fail(run.id(), task.id(), result.summary());
                     reportService.generate(task, run.id(), "Failed: " + result.summary());
+                    log.warn("Run {} blocked while executing plan item {}: {}", run.id(), next.id(), result.summary());
                     return;
                 }
                 planService.updateItemStatus(next.id(), Domain.PlanItemStatus.COMPLETED);
+                log.info("Run {} completed plan item {}: {}", run.id(), next.id(), result.summary());
             }
 
             planService.updatePlanStatus(plan.plan().id(), Domain.PlanStatus.COMPLETED);
+            log.info("Run {} completed plan {}", run.id(), plan.plan().id());
             var validationResult = validateIfNeeded(task.id(), run.id(), workspace);
             if (validationResult.waitingApproval()) {
+                log.info("Run {} paused during validation awaiting approval: {}", run.id(), validationResult.summary());
                 return;
             }
             if (validationResult.blocked()) {
                 runService.fail(run.id(), task.id(), validationResult.summary());
                 reportService.generate(task, run.id(), "Failed validation: " + validationResult.summary());
+                log.warn("Run {} failed validation: {}", run.id(), validationResult.summary());
                 return;
             }
             reportService.generate(task, run.id(), validationResult.summary());
             runService.complete(run.id(), task.id());
+            log.info("Run {} completed successfully: {}", run.id(), validationResult.summary());
         } catch (Exception e) {
             // Convert unexpected runtime failures into normal domain state so API
             // clients and audit readers get a report instead of only a stacktrace.
-            runService.fail(run.id(), task.id(), e.getMessage());
-            reportService.generate(task, run.id(), "Failed: " + e.getMessage());
+            log.error("Agent run {} failed", run.id(), e);
+            var reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            runService.fail(run.id(), task.id(), reason);
+            generateFailureReport(task, run.id(), reason);
         }
+    }
+
+    /**
+     * Writes a failure report without letting report generation hide the
+     * original runtime failure.
+     */
+    private void generateFailureReport(com.nask.agent.task.CodingTask task, UUID runId, String reason) {
+        try {
+            reportService.generate(task, runId, "Failed: " + reason);
+        } catch (Exception reportError) {
+            log.warn("Failed to generate report for failed agent run {}", runId, reportError);
+        }
+    }
+
+    /**
+     * Continues a command that paused for approval instead of replaying the
+     * whole agent loop from task understanding.
+     */
+    private boolean resumeApprovedPauseIfPresent(com.nask.agent.task.CodingTask task, AgentRun run,
+                                                 com.nask.agent.workspace.Workspace workspace) {
+        var command = commandExecutionRepository.findApprovedWaitingByRun(run.id());
+        if (command.isEmpty()) {
+            return false;
+        }
+
+        var execution = command.get();
+        var step = stepService.getRequired(execution.stepId());
+        log.info("Run {} resuming approved command execution {}", run.id(), execution.id());
+        var result = commandToolService.resumeApprovedCommand(
+                new ToolExecutionContext(task.id(), run.id(), execution.stepId(), execution.actionId(), workspace), execution);
+        if (result.blocked() || result.waitingApproval()) {
+            stepService.fail(task.id(), run.id(), step, result.summary());
+            runService.fail(run.id(), task.id(), result.summary());
+            reportService.generate(task, run.id(), "Failed while resuming approved command: " + result.summary());
+            log.warn("Run {} failed while resuming approved command {}: {}", run.id(), execution.id(), result.summary());
+            return true;
+        }
+
+        if (Domain.StepType.VALIDATE.name().equals(step.stepType())) {
+            var exitCode = integer(result.payload(), "exitCode", 1);
+            var commandId = uuid(result.payload().get("commandId"));
+            validationService.record(task.id(), run.id(), step.id(), commandId, Domain.ValidationType.TEST,
+                    exitCode == 0, result.summary());
+            stepService.complete(task.id(), run.id(), step, result.summary());
+            if (exitCode == 0) {
+                reportService.generate(task, run.id(), "Task completed. Validation passed: " + result.summary());
+                runService.complete(run.id(), task.id());
+                log.info("Run {} completed after resuming approved validation command {}", run.id(), execution.id());
+            } else {
+                var summary = "Validation failed: " + result.summary();
+                runService.fail(run.id(), task.id(), summary);
+                reportService.generate(task, run.id(), "Failed validation: " + result.summary());
+                log.warn("Run {} failed validation after resuming approved command {}: {}", run.id(), execution.id(), result.summary());
+            }
+            return true;
+        }
+
+        stepService.complete(task.id(), run.id(), step, result.summary());
+        reportService.generate(task, run.id(), "Task completed. Approved command completed: " + result.summary());
+        runService.complete(run.id(), task.id());
+        log.info("Run {} completed after resuming approved command {}", run.id(), execution.id());
+        return true;
     }
 
     /**
@@ -193,7 +287,11 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
         // centralized.
         var result = commandToolService.runCommand(new ToolExecutionContext(taskId, runId, step.id(), action.id(), workspace),
                 executable, arguments, ".", validation.reason());
-        if (result.waitingApproval() || result.blocked()) {
+        if (result.waitingApproval()) {
+            stepService.markWaitingApproval(taskId, runId, step, result.summary());
+            return result;
+        }
+        if (result.blocked()) {
             stepService.complete(taskId, runId, step, result.summary());
             return result;
         }
@@ -213,7 +311,7 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                                                 PlanItem item, List<String> observedFiles) {
         planService.updateItemStatus(item.id(), Domain.PlanItemStatus.IN_PROGRESS);
         var step = stepService.start(taskId, runId, item.id(), Domain.StepType.EXECUTE_PLAN_ITEM, item.description());
-        var decision = llmGateway.decideNextAction(new ExecutionContext(taskId, runId, item, observedFiles));
+        var decision = llmGateway.decideNextAction(new ExecutionContext(taskId, runId, step.id(), item, observedFiles));
         ToolExecutionResult last = ToolExecutionResult.success("No action required", Map.of());
         for (var actionDraft : decision.actions()) {
             // Each model action becomes an auditable domain action before a tool
@@ -221,7 +319,11 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             var action = actionService.create(step.id(), Domain.ActionType.CALL_TOOL, actionDraft.reason(), Domain.RiskLevel.MEDIUM);
             var context = new ToolExecutionContext(taskId, runId, step.id(), action.id(), workspace);
             last = executeAction(context, actionDraft.type(), actionDraft.input(), actionDraft.reason());
-            if (last.waitingApproval() || last.blocked()) {
+            if (last.waitingApproval()) {
+                stepService.markWaitingApproval(taskId, runId, step, last.summary());
+                return last;
+            }
+            if (last.blocked()) {
                 stepService.complete(taskId, runId, step, last.summary());
                 return last;
             }

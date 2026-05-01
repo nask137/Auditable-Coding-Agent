@@ -42,7 +42,7 @@ public final class Domain {
      * Lifecycle of an execution step.
      */
     public enum StepStatus {
-        RUNNING, COMPLETED, FAILED
+        RUNNING, WAITING_APPROVAL, COMPLETED, FAILED
     }
 
     /**

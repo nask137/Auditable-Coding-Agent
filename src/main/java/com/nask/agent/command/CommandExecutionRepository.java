@@ -1,5 +1,6 @@
 package com.nask.agent.command;
 
+import com.nask.agent.common.Domain;
 import com.nask.agent.common.JsonSupport;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -11,6 +12,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
@@ -63,6 +65,55 @@ public class CommandExecutionRepository {
                 .addValue("exitCode", exitCode)
                 .addValue("outputSummary", outputSummary)
                 .addValue("finishedAt", ts(Instant.now())));
+    }
+
+    /**
+     * Links the approval request that can later resume this waiting command.
+     */
+    public void attachApproval(UUID id, UUID approvalId) {
+        jdbc.update("""
+                update command_execution
+                   set approval_id = :approvalId
+                 where id = :id
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("approvalId", approvalId));
+    }
+
+    /**
+     * Marks a previously waiting command as actively running.
+     */
+    public void markRunning(UUID id) {
+        jdbc.update("""
+                update command_execution
+                   set status = :status,
+                       started_at = :startedAt
+                 where id = :id
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("status", Domain.CommandExecutionStatus.RUNNING.name())
+                .addValue("startedAt", ts(Instant.now())));
+    }
+
+    /**
+     * Finds the oldest approved command execution pause for a run.
+     */
+    public Optional<CommandExecution> findApprovedWaitingByRun(UUID runId) {
+        return jdbc.query("""
+                select ce.*
+                  from command_execution ce
+                  join approval_request ar on ar.id = ce.approval_id
+                 where ce.run_id = :runId
+                   and ce.status = :commandStatus
+                   and ar.status = :approvalStatus
+                   and ar.approval_type = :approvalType
+                 order by ar.resolved_at nulls last, ce.created_at, ce.id
+                 limit 1
+                """, new MapSqlParameterSource()
+                .addValue("runId", runId)
+                .addValue("commandStatus", Domain.CommandExecutionStatus.WAITING_APPROVAL.name())
+                .addValue("approvalStatus", Domain.ApprovalStatus.APPROVED.name())
+                .addValue("approvalType", Domain.ApprovalType.COMMAND_EXECUTION.name()), mapper()).stream().findFirst();
     }
 
     /**

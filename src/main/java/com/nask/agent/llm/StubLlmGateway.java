@@ -1,6 +1,7 @@
 package com.nask.agent.llm;
 
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.Map;
  * should keep the same method contracts.</p>
  */
 @Component
+@ConditionalOnProperty(name = "agent.llm.provider", havingValue = "stub", matchIfMissing = true)
 public class StubLlmGateway implements LlmGateway {
     /**
      * Produces a simple task understanding from the raw request text.

@@ -11,6 +11,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static com.nask.agent.common.DbValues.ts;
@@ -54,6 +55,18 @@ public class AgentStepRepository {
     }
 
     /**
+     * Marks a step as paused while waiting for approval.
+     */
+    public void markWaitingApproval(UUID id, String outputSummary) {
+        jdbc.update("""
+                update agent_step set status = :status, output_summary = :outputSummary, finished_at = null where id = :id
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("status", Domain.StepStatus.WAITING_APPROVAL.name())
+                .addValue("outputSummary", outputSummary));
+    }
+
+    /**
      * Marks a step failed and stores its output summary.
      */
     public void fail(UUID id, String outputSummary) {
@@ -72,6 +85,14 @@ public class AgentStepRepository {
     public List<AgentStep> findByRun(UUID runId) {
         return jdbc.query("select * from agent_step where run_id = :runId order by started_at, id",
                 new MapSqlParameterSource("runId", runId), mapper());
+    }
+
+    /**
+     * Finds one step by id.
+     */
+    public Optional<AgentStep> findById(UUID id) {
+        return jdbc.query("select * from agent_step where id = :id",
+                new MapSqlParameterSource("id", id), mapper()).stream().findFirst();
     }
 
     private MapSqlParameterSource params(AgentStep step) {

@@ -1,5 +1,10 @@
 package com.nask.agent.llm;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -7,10 +12,10 @@ import java.util.UUID;
 /**
  * Model decision for how to execute the current plan item.
  */
-public record AgentDecision(UUID planItemId, List<Action> actions) {
+public record AgentDecision(@NotNull UUID planItemId, @NotNull @Size(max = 5) List<@Valid Action> actions) {
     /**
      * Tool action requested by the model.
      */
-    public record Action(String type, String reason, Map<String, Object> input) {
+    public record Action(@NotBlank String type, @NotBlank String reason, @NotNull Map<String, Object> input) {
     }
 }

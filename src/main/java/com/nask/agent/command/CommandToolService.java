@@ -127,6 +127,7 @@ public class CommandToolService {
             var approval = approvalService.create(context.taskId(), context.runId(), context.stepId(), context.actionId(),
                     Domain.ApprovalType.COMMAND_EXECUTION, Domain.RiskLevel.HIGH,
                     "Command requires approval: " + commandText, List.of(), commandText, cwdCheck.relativePath(), null);
+            commandRepository.attachApproval(execution.id(), approval.id());
             auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
                     Domain.AuditEventType.CommandApprovalRequired, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
                     "Command approval required", commandText, List.of(), call.id(), approval.id(), execution.id(), null,
@@ -154,6 +155,52 @@ public class CommandToolService {
         toolRecords.completeCall(call.id(), result.exitCode() == 0 ? Domain.ToolCallStatus.COMPLETED : Domain.ToolCallStatus.FAILED);
         var payload = Map.<String, Object>of("exitCode", result.exitCode(), "commandId", execution.id().toString());
         toolRecords.insertResult(call.id(), result.exitCode() == 0, result.summary(), payload, null, Map.of());
+        return ToolExecutionResult.success(result.summary(), payload);
+    }
+
+    /**
+     * Resumes the exact command execution that was paused for user approval.
+     */
+    public ToolExecutionResult resumeApprovedCommand(ToolExecutionContext context, CommandExecution execution) {
+        if (!Domain.CommandExecutionStatus.WAITING_APPROVAL.name().equals(execution.status())) {
+            return ToolExecutionResult.blocked("Command is not waiting for approval");
+        }
+        if (execution.approvalId() == null) {
+            return ToolExecutionResult.blocked("Command has no linked approval request");
+        }
+        var cwdCheck = pathGuard.check(context.workspace(), execution.workingDirectory(), false);
+        if (!cwdCheck.allowed()) {
+            commandRepository.complete(execution.id(), Domain.CommandExecutionStatus.BLOCKED.name(), null, cwdCheck.reason());
+            auditBlocked(context, null, execution.id(), execution.command(), cwdCheck.reason());
+            return ToolExecutionResult.blocked(cwdCheck.reason());
+        }
+        var consumed = approvalService.consumeApproved(context.runId(), Domain.ApprovalType.COMMAND_EXECUTION,
+                List.of(), execution.command(), cwdCheck.relativePath());
+        if (consumed == null) {
+            return ToolExecutionResult.blocked("No approved command request is available to resume");
+        }
+        auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
+                Domain.AuditEventType.CommandAllowed, Domain.AuditActor.RUNTIME, Domain.AuditLevel.INFO,
+                "Command allowed by approved request", execution.command(), List.of(), null, consumed.id(), execution.id(), null,
+                Domain.PermissionLevel.SHELL_RISKY, Domain.RiskLevel.HIGH, Domain.ApprovalStatus.CONSUMED,
+                true, null, null, Map.of()));
+        commandRepository.markRunning(execution.id());
+        var result = executeProcess(execution.executable(), execution.arguments(), cwdCheck.absolutePath());
+        var finalStatus = result.exitCode() == 0 ? Domain.CommandExecutionStatus.COMPLETED : Domain.CommandExecutionStatus.FAILED;
+        commandRepository.complete(execution.id(), finalStatus.name(), result.exitCode(), result.summary());
+        var toolCall = toolRecords.findLatestCall(execution.actionId(), "run_command");
+        var payload = Map.<String, Object>of("exitCode", result.exitCode(), "commandId", execution.id().toString());
+        if (toolCall.isPresent()) {
+            toolRecords.completeCall(toolCall.get().id(), result.exitCode() == 0 ? Domain.ToolCallStatus.COMPLETED : Domain.ToolCallStatus.FAILED);
+            toolRecords.insertResult(toolCall.get().id(), result.exitCode() == 0, result.summary(), payload,
+                    result.exitCode() == 0 ? null : result.summary(), Map.of("resumedFromApproval", true));
+        }
+        auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
+                Domain.AuditEventType.CommandExecuted, Domain.AuditActor.TOOL, result.exitCode() == 0 ? Domain.AuditLevel.INFO : Domain.AuditLevel.ERROR,
+                "Command executed", result.summary(), List.of(), null, consumed.id(), execution.id(), null,
+                Domain.PermissionLevel.SHELL_RISKY, Domain.RiskLevel.HIGH, Domain.ApprovalStatus.CONSUMED,
+                result.exitCode() == 0, result.exitCode() == 0 ? null : "COMMAND_FAILED",
+                result.exitCode() == 0 ? null : result.summary(), Map.of("exitCode", result.exitCode())));
         return ToolExecutionResult.success(result.summary(), payload);
     }
 
