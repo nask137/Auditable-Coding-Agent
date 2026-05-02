@@ -42,7 +42,7 @@ public final class Domain {
      * Lifecycle of an execution step.
      */
     public enum StepStatus {
-        RUNNING, WAITING_APPROVAL, COMPLETED, FAILED
+        RUNNING, WAITING_APPROVAL, WAITING_USER_INPUT, COMPLETED, FAILED
     }
 
     /**
@@ -131,8 +131,61 @@ public final class Domain {
         ApprovalDenied,
         ValidationStarted,
         ValidationCompleted,
+        ValidationFailed,
+        RuntimeRejected,
+        RecoveryStarted,
+        RecoveryRetried,
+        RecoveryReplanned,
+        RecoveryUserInputRequested,
+        RecoverySkipped,
+        RecoveryExhausted,
+        UserInputRequested,
+        UserInputProvided,
+        UserInputCancelled,
         AgentFinished,
         AgentFailed
+    }
+
+    /**
+     * Structured runtime failure classes used for recovery decisions.
+     */
+    public enum RuntimeFailureType {
+        MODEL_CALL_FAILED,
+        MODEL_OUTPUT_PARSE_FAILED,
+        MODEL_OUTPUT_VALIDATION_FAILED,
+        MODEL_DECISION_MISMATCH,
+        UNSUPPORTED_TOOL_INTENT,
+        TOOL_PERMISSION_BLOCKED,
+        TOOL_EXECUTION_FAILED,
+        PATCH_CONFLICT,
+        PATH_ACCESS_BLOCKED,
+        COMMAND_POLICY_BLOCKED,
+        COMMAND_EXECUTION_FAILED,
+        VALIDATION_FAILED,
+        APPROVAL_DENIED,
+        USER_INPUT_REQUIRED,
+        RUNTIME_LIMIT_EXCEEDED,
+        UNEXPECTED_RUNTIME_ERROR
+    }
+
+    /**
+     * Recovery action selected by the runtime after a structured failure.
+     */
+    public enum RecoveryStrategy {
+        RETRY_SAME_ACTION,
+        REPLAN_CURRENT_ITEM,
+        REPLAN_REMAINING_PLAN,
+        ASK_USER,
+        REQUEST_APPROVAL,
+        SKIP_PLAN_ITEM,
+        FAIL_TASK
+    }
+
+    /**
+     * Lifecycle of a request for additional user guidance.
+     */
+    public enum UserInputStatus {
+        PENDING, ANSWERED, CANCELLED, EXPIRED
     }
 
     /**

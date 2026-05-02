@@ -2,6 +2,8 @@ package com.nask.agent.run;
 
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.plan.PlanView;
+import com.nask.agent.runtime.RuntimeFailure;
+import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.step.AgentStep;
 import com.nask.agent.step.AgentStepService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,14 +23,17 @@ public class RunController {
     private final AgentRunService runService;
     private final PlanService planService;
     private final AgentStepService stepService;
+    private final RuntimeFailureService runtimeFailureService;
 
     /**
      * Creates a run observation controller.
      */
-    public RunController(AgentRunService runService, PlanService planService, AgentStepService stepService) {
+    public RunController(AgentRunService runService, PlanService planService, AgentStepService stepService,
+                         RuntimeFailureService runtimeFailureService) {
         this.runService = runService;
         this.planService = planService;
         this.stepService = stepService;
+        this.runtimeFailureService = runtimeFailureService;
     }
 
     /**
@@ -53,5 +58,13 @@ public class RunController {
     @GetMapping("/{runId}/steps")
     List<AgentStep> steps(@PathVariable UUID runId) {
         return stepService.findByRun(runId);
+    }
+
+    /**
+     * Lists structured runtime failures for a run.
+     */
+    @GetMapping("/{runId}/failures")
+    List<RuntimeFailure> failures(@PathVariable UUID runId) {
+        return runtimeFailureService.findByRun(runId);
     }
 }

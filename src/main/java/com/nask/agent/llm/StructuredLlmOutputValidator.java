@@ -1,5 +1,6 @@
 package com.nask.agent.llm;
 
+import com.nask.agent.common.Domain;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.springframework.stereotype.Component;
@@ -30,7 +31,8 @@ public class StructuredLlmOutputValidator {
     public <T> T validate(T value) {
         var violations = validator.validate(value);
         if (!violations.isEmpty()) {
-            throw new LlmGatewayException("Model output failed bean validation: " + summarize(violations));
+            throw new LlmGatewayException("Model output failed bean validation: " + summarize(violations),
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
         switch (value) {
             case TaskUnderstanding understanding -> validateTaskUnderstanding(understanding);
@@ -44,14 +46,16 @@ public class StructuredLlmOutputValidator {
 
     private void validateTaskUnderstanding(TaskUnderstanding understanding) {
         if (!Set.of("BUG_FIX", "TEST", "CODE_EDIT", "REVIEW", "OTHER").contains(understanding.taskType())) {
-            throw new LlmGatewayException("Unsupported task type from model: " + understanding.taskType());
+            throw new LlmGatewayException("Unsupported task type from model: " + understanding.taskType(),
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
     }
 
     private void validateAgentDecision(AgentDecision decision) {
         for (var action : decision.actions()) {
             if (!ACTION_TYPES.contains(action.type())) {
-                throw new LlmGatewayException("Unsupported action type from model: " + action.type());
+                throw new LlmGatewayException("Unsupported action type from model: " + action.type(),
+                        Domain.RuntimeFailureType.UNSUPPORTED_TOOL_INTENT, null);
             }
             requireInputs(action.type(), action.input());
         }
@@ -79,32 +83,37 @@ public class StructuredLlmOutputValidator {
                     requireString(input, "workingDirectory");
                 }
             }
-            default -> throw new LlmGatewayException("Unsupported action type from model: " + type);
+            default -> throw new LlmGatewayException("Unsupported action type from model: " + type,
+                    Domain.RuntimeFailureType.UNSUPPORTED_TOOL_INTENT, null);
         }
     }
 
     private void validateValidationDecision(ValidationDecision decision) {
         if (decision.shouldValidate() && decision.executableAndArgs().isEmpty()) {
-            throw new LlmGatewayException("Validation decision must include executableAndArgs when shouldValidate is true");
+            throw new LlmGatewayException("Validation decision must include executableAndArgs when shouldValidate is true",
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
     }
 
     private void requireString(Map<String, Object> input, String key) {
         var value = input.get(key);
         if (!(value instanceof String string) || string.isBlank()) {
-            throw new LlmGatewayException("Action input requires non-blank string field: " + key);
+            throw new LlmGatewayException("Action input requires non-blank string field: " + key,
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
     }
 
     private void requireStringValue(Map<String, Object> input, String key) {
         if (!(input.get(key) instanceof String)) {
-            throw new LlmGatewayException("Action input requires string field: " + key);
+            throw new LlmGatewayException("Action input requires string field: " + key,
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
     }
 
     private void requireNumber(Map<String, Object> input, String key) {
         if (!(input.get(key) instanceof Number)) {
-            throw new LlmGatewayException("Action input requires numeric field: " + key);
+            throw new LlmGatewayException("Action input requires numeric field: " + key,
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
     }
 

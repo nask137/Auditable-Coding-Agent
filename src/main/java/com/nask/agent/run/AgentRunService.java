@@ -60,6 +60,18 @@ public class AgentRunService {
     public void markWaitingApproval(UUID runId, UUID taskId) {
         repository.updateStatus(runId, Domain.AgentRunStatus.WAITING_APPROVAL, null);
         taskService.updateStatus(taskId, Domain.TaskStatus.WAITING_APPROVAL);
+        auditService.append(AuditEventDraft.info(taskId, runId, null, Domain.AuditEventType.AgentRunPaused,
+                Domain.AuditActor.RUNTIME, "Pause agent run", "Waiting for approval"));
+    }
+
+    /**
+     * Pauses run and task state until user input is supplied.
+     */
+    public void markWaitingUserInput(UUID runId, UUID taskId, String reason) {
+        repository.updateStatus(runId, Domain.AgentRunStatus.WAITING_USER_INPUT, null);
+        taskService.updateStatus(taskId, Domain.TaskStatus.WAITING_USER_INPUT);
+        auditService.append(AuditEventDraft.info(taskId, runId, null, Domain.AuditEventType.AgentRunPaused,
+                Domain.AuditActor.RUNTIME, "Pause agent run", reason));
     }
 
     /**
@@ -68,6 +80,8 @@ public class AgentRunService {
     public void markRunning(UUID runId, UUID taskId) {
         repository.updateStatus(runId, Domain.AgentRunStatus.RUNNING, null);
         taskService.updateStatus(taskId, Domain.TaskStatus.RUNNING);
+        auditService.append(AuditEventDraft.info(taskId, runId, null, Domain.AuditEventType.AgentRunResumed,
+                Domain.AuditActor.RUNTIME, "Resume agent run", "Run returned to RUNNING"));
     }
 
     /**

@@ -22,11 +22,16 @@ import java.util.concurrent.Callable;
                 AgentCli.RunCommand.class,
                 AgentCli.StatusCommand.class,
                 AgentCli.EventsCommand.class,
+                AgentCli.FailuresCommand.class,
                 AgentCli.DiffCommand.class,
                 AgentCli.ReportCommand.class,
                 AgentCli.ApprovalsCommand.class,
                 AgentCli.ApproveCommand.class,
                 AgentCli.DenyCommand.class,
+                AgentCli.InputsCommand.class,
+                AgentCli.InputCommand.class,
+                AgentCli.AnswerCommand.class,
+                AgentCli.CancelInputCommand.class,
                 AgentCli.CommandPolicyCommand.class
         })
 public class AgentCli implements Callable<Integer> {
@@ -197,6 +202,22 @@ public class AgentCli implements Callable<Integer> {
     }
 
     /**
+     * Displays task runtime failures.
+     */
+    @CommandLine.Command(name = "failures")
+    static class FailuresCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String taskId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/tasks/" + taskId + "/failures"));
+            return 0;
+        }
+    }
+
+    /**
      * Displays recorded file changes.
      */
     @CommandLine.Command(name = "diff")
@@ -286,6 +307,70 @@ public class AgentCli implements Callable<Integer> {
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
             System.out.println(root.post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "cli", "reason", "Denied from CLI")));
+            return 0;
+        }
+    }
+
+    /**
+     * Lists pending user-input requests.
+     */
+    @CommandLine.Command(name = "inputs")
+    static class InputsCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/user-input-requests?status=PENDING"));
+            return 0;
+        }
+    }
+
+    /**
+     * Displays one user-input request.
+     */
+    @CommandLine.Command(name = "input")
+    static class InputCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String requestId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/user-input-requests/" + requestId));
+            return 0;
+        }
+    }
+
+    /**
+     * Answers a pending user-input request and resumes the run.
+     */
+    @CommandLine.Command(name = "answer")
+    static class AnswerCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String requestId;
+        @CommandLine.Option(names = "--text", required = true) String answer;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.post("/api/user-input-requests/" + requestId + "/answer", Map.of("answer", answer)));
+            return 0;
+        }
+    }
+
+    /**
+     * Cancels a pending user-input request and fails the run.
+     */
+    @CommandLine.Command(name = "cancel-input")
+    static class CancelInputCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String requestId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.post("/api/user-input-requests/" + requestId + "/cancel", null));
             return 0;
         }
     }

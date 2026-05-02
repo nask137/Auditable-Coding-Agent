@@ -6,6 +6,8 @@ import com.nask.agent.file.FileChange;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.report.ReportService;
 import com.nask.agent.report.TaskReport;
+import com.nask.agent.runtime.RuntimeFailure;
+import com.nask.agent.runtime.RuntimeFailureService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,15 +25,17 @@ public class ObservationController {
     private final AuditService auditService;
     private final FileChangeRepository fileChangeRepository;
     private final ReportService reportService;
+    private final RuntimeFailureService runtimeFailureService;
 
     /**
      * Creates an observation controller.
      */
     public ObservationController(AuditService auditService, FileChangeRepository fileChangeRepository,
-                                 ReportService reportService) {
+                                 ReportService reportService, RuntimeFailureService runtimeFailureService) {
         this.auditService = auditService;
         this.fileChangeRepository = fileChangeRepository;
         this.reportService = reportService;
+        this.runtimeFailureService = runtimeFailureService;
     }
 
     /**
@@ -56,5 +60,13 @@ public class ObservationController {
     @GetMapping("/report")
     TaskReport report(@PathVariable UUID taskId) {
         return reportService.getLatestRequired(taskId);
+    }
+
+    /**
+     * Lists structured runtime failures for a task.
+     */
+    @GetMapping("/failures")
+    List<RuntimeFailure> failures(@PathVariable UUID taskId) {
+        return runtimeFailureService.findByTask(taskId);
     }
 }
