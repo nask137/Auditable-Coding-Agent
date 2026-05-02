@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -62,8 +63,21 @@ public class GitToolService {
                 complete(call.id(), false, cwdCheck.reason(), Map.of(), cwdCheck.reason());
                 return ToolExecutionResult.blocked(cwdCheck.reason());
             }
+            var gitRoot = resolveGitRoot(cwdCheck.absolutePath().toFile());
+            if (gitRoot.exitCode() != 0) {
+                var payload = Map.<String, Object>of("exitCode", gitRoot.exitCode(), "output", gitRoot.output());
+                complete(call.id(), false, summary("git_diff", gitRoot), payload, gitRoot.output());
+                return ToolExecutionResult.blocked(summary("git_diff", gitRoot));
+            }
+            var repoRoot = Path.of(firstLine(gitRoot.output())).toAbsolutePath().normalize();
+            var workspaceRoot = Path.of(context.workspace().rootPath()).toAbsolutePath().normalize();
+            if (!repoRoot.startsWith(workspaceRoot)) {
+                var reason = "Git repository root is outside trusted workspace";
+                complete(call.id(), false, reason, Map.of(), reason);
+                return ToolExecutionResult.blocked(reason);
+            }
             var names = execute(safeGitArguments(List.of("diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--")),
-                    cwdCheck.absolutePath().toFile());
+                    repoRoot.toFile());
             if (names.exitCode() != 0) {
                 var payload = Map.<String, Object>of("exitCode", names.exitCode(), "output", names.output());
                 complete(call.id(), false, summary("git_diff", names), payload, names.output());
@@ -73,36 +87,38 @@ public class GitToolService {
             var allowedOutput = new StringBuilder();
             var included = new ArrayList<String>();
             var filtered = new ArrayList<String>();
-            for (var path : parseNullSeparated(names.output())) {
-                if (path.isBlank()) {
+            for (var repoPath : parseNullSeparated(names.output())) {
+                if (repoPath.isBlank()) {
                     continue;
                 }
-                var check = pathGuard.check(context.workspace(), path, false);
+                var workspacePath = workspaceRoot.relativize(repoRoot.resolve(repoPath).toAbsolutePath().normalize())
+                        .toString().replace('\\', '/');
+                var check = pathGuard.check(context.workspace(), workspacePath, false);
                 var decision = permissionService.fileDecision(check, Domain.FileOperation.FILE_READ, false, 0);
                 auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
                         Domain.AuditEventType.PermissionChecked, Domain.AuditActor.RUNTIME, Domain.AuditLevel.INFO,
-                        "Check git diff path permission", decision.reason(), List.of(path), call.id(), null, null,
+                        "Check git diff path permission", decision.reason(), List.of(workspacePath), call.id(), null, null,
                         null, Domain.PermissionLevel.GIT_READ, decision.riskLevel(), null,
                         decision.decision() == Domain.PermissionDecisionType.ALLOW, null, null,
                         Map.of("decision", decision.decision().name())));
                 if (decision.decision() != Domain.PermissionDecisionType.ALLOW) {
-                    filtered.add(path);
+                    filtered.add(workspacePath);
                     auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
                             Domain.AuditEventType.PermissionBlocked, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
-                            "Git diff path filtered", decision.reason(), List.of(path), call.id(), null, null,
+                            "Git diff path filtered", decision.reason(), List.of(workspacePath), call.id(), null, null,
                             null, Domain.PermissionLevel.GIT_READ, decision.riskLevel(), null,
                             false, "GIT_DIFF_PATH_FILTERED", decision.reason(), Map.of()));
                     continue;
                 }
-                var fileDiff = execute(safeGitArguments(List.of("diff", "--no-ext-diff", "--no-textconv", "--", path)),
-                        cwdCheck.absolutePath().toFile());
+                var fileDiff = execute(safeGitArguments(List.of("diff", "--no-ext-diff", "--no-textconv", "--", repoPath)),
+                        repoRoot.toFile());
                 if (fileDiff.exitCode() != 0) {
                     var payload = Map.<String, Object>of("exitCode", fileDiff.exitCode(), "output", fileDiff.output(),
-                            "path", path);
+                            "path", workspacePath);
                     complete(call.id(), false, summary("git_diff", fileDiff), payload, fileDiff.output());
                     return ToolExecutionResult.blocked(summary("git_diff", fileDiff));
                 }
-                included.add(path);
+                included.add(workspacePath);
                 allowedOutput.append(fileDiff.output());
                 if (!fileDiff.output().endsWith("\n")) {
                     allowedOutput.append('\n');
@@ -169,6 +185,10 @@ public class GitToolService {
         return args;
     }
 
+    private ProcessResult resolveGitRoot(java.io.File cwd) {
+        return execute(safeGitArguments(List.of("rev-parse", "--show-toplevel")), cwd);
+    }
+
     private ProcessResult execute(List<String> gitArguments, java.io.File cwd) {
         try {
             var command = new ArrayList<String>();
@@ -217,6 +237,13 @@ public class GitToolService {
         return java.util.Arrays.stream(output.split("\u0000"))
                 .filter(value -> !value.isBlank())
                 .toList();
+    }
+
+    private String firstLine(String output) {
+        if (output == null || output.isBlank()) {
+            return "";
+        }
+        return output.lines().findFirst().orElse("").trim();
     }
 
     private String summary(String toolName, ProcessResult result) {
