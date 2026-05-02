@@ -10,6 +10,7 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 - 创建、启动、取消和查询编码任务。
 - 为每次任务创建 AgentRun、AgentStep、AgentAction、Plan 和 PlanItem。
 - 通过文件工具执行 `list_files`、`read_file`、`search_text`、`create_file` 和 `apply_patch`。
+- 通过 Git 只读工具执行 `git_status` 和 `git_diff`，用于审计修改结果。
 - 通过命令工具执行受策略控制的 `run_command`。
 - 对白名单外命令、敏感文件、高影响文件或大范围修改创建审批请求。
 - 记录 AuditEvent、ToolCall、ToolResult、FileChange、CommandExecution、ApprovalRequest、ValidationResult 和 TaskReport。

@@ -23,6 +23,17 @@ class StructuredLlmOutputValidatorTests {
     }
 
     @Test
+    void acceptsPatchAndGitToolIntent() {
+        var decision = new AgentDecision(UUID.randomUUID(), List.of(
+                new AgentDecision.Action("APPLY_PATCH", "Fix exact bug",
+                        Map.of("path", "src/App.java", "oldText", "return false;", "newText", "return true;")),
+                new AgentDecision.Action("GIT_STATUS", "Inspect changed files", Map.of("workingDirectory", ".")),
+                new AgentDecision.Action("GIT_DIFF", "Inspect diff", Map.of("workingDirectory", "."))));
+
+        assertThat(validator.validate(decision)).isSameAs(decision);
+    }
+
+    @Test
     void rejectsUnsupportedToolIntent() {
         var decision = new AgentDecision(UUID.randomUUID(), List.of(
                 new AgentDecision.Action("RUN_COMMAND", "Bypass runtime", Map.of("executable", "mvn"))));
@@ -40,6 +51,17 @@ class StructuredLlmOutputValidatorTests {
         assertThatThrownBy(() -> validator.validate(decision))
                 .isInstanceOf(LlmGatewayException.class)
                 .hasMessageContaining("content");
+    }
+
+    @Test
+    void rejectsPatchWithoutExactOldText() {
+        var decision = new AgentDecision(UUID.randomUUID(), List.of(
+                new AgentDecision.Action("APPLY_PATCH", "Patch file",
+                        Map.of("path", "src/App.java", "newText", "replacement"))));
+
+        assertThatThrownBy(() -> validator.validate(decision))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("oldText");
     }
 
     @Test

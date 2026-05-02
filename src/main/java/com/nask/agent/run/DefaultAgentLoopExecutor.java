@@ -7,6 +7,7 @@ import com.nask.agent.common.AgentSettings;
 import com.nask.agent.common.Domain;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.file.FileToolService;
+import com.nask.agent.git.GitToolService;
 import com.nask.agent.llm.ExecutionContext;
 import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.PlanningContext;
@@ -19,6 +20,7 @@ import com.nask.agent.step.AgentStepService;
 import com.nask.agent.task.TaskService;
 import com.nask.agent.tool.ToolExecutionContext;
 import com.nask.agent.tool.ToolExecutionResult;
+import com.nask.agent.tool.ToolRecordRepository;
 import com.nask.agent.validation.ValidationService;
 import com.nask.agent.workspace.WorkspaceService;
 import org.slf4j.Logger;
@@ -50,12 +52,14 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
     private final PlanService planService;
     private final LlmGateway llmGateway;
     private final FileToolService fileToolService;
+    private final GitToolService gitToolService;
     private final ReportService reportService;
     private final CommandToolService commandToolService;
     private final ValidationService validationService;
     private final AgentSettings settings;
     private final FileChangeRepository fileChangeRepository;
     private final CommandExecutionRepository commandExecutionRepository;
+    private final ToolRecordRepository toolRecordRepository;
 
     /**
      * Wires the executor to all domain services that own persistence and policy.
@@ -64,10 +68,11 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                                     WorkspaceService workspaceService, AgentStepService stepService,
                                     AgentActionService actionService, PlanService planService,
                                     LlmGateway llmGateway, FileToolService fileToolService,
-                                    ReportService reportService, CommandToolService commandToolService,
+                                    GitToolService gitToolService, ReportService reportService, CommandToolService commandToolService,
                                     ValidationService validationService, AgentSettings settings,
                                     FileChangeRepository fileChangeRepository,
-                                    CommandExecutionRepository commandExecutionRepository) {
+                                    CommandExecutionRepository commandExecutionRepository,
+                                    ToolRecordRepository toolRecordRepository) {
         this.runService = runService;
         this.taskService = taskService;
         this.workspaceService = workspaceService;
@@ -76,12 +81,14 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
         this.planService = planService;
         this.llmGateway = llmGateway;
         this.fileToolService = fileToolService;
+        this.gitToolService = gitToolService;
         this.reportService = reportService;
         this.commandToolService = commandToolService;
         this.validationService = validationService;
         this.settings = settings;
         this.fileChangeRepository = fileChangeRepository;
         this.commandExecutionRepository = commandExecutionRepository;
+        this.toolRecordRepository = toolRecordRepository;
     }
 
     /**
@@ -312,7 +319,8 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                                                 PlanItem item, List<String> observedFiles) {
         planService.updateItemStatus(item.id(), Domain.PlanItemStatus.IN_PROGRESS);
         var step = stepService.start(taskId, runId, item.id(), Domain.StepType.EXECUTE_PLAN_ITEM, item.description());
-        var decision = llmGateway.decideNextAction(new ExecutionContext(taskId, runId, step.id(), item, observedFiles));
+        var decision = llmGateway.decideNextAction(new ExecutionContext(taskId, runId, step.id(), item, observedFiles,
+                toolRecordRepository.findRecentSummariesByRun(runId, 8)));
         ToolExecutionResult last = ToolExecutionResult.success("No action required", Map.of());
         for (var actionDraft : decision.actions()) {
             // Each model action becomes an auditable domain action before a tool
@@ -351,6 +359,16 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                 yield fileToolService.createFile(context, string(input, "path", "AGENT_TASK_NOTE.md"),
                         string(input, "content", ""), reason);
             }
+            case "APPLY_PATCH" -> {
+                var beforeCount = fileChangeRepository.countByRun(context.runId());
+                if (beforeCount >= settings.maxFileChanges()) {
+                    yield ToolExecutionResult.blocked("Maximum file change count exceeded");
+                }
+                yield fileToolService.applyPatch(context, string(input, "path", "."),
+                        string(input, "oldText", ""), string(input, "newText", ""), reason);
+            }
+            case "GIT_STATUS" -> gitToolService.status(context, string(input, "workingDirectory", "."));
+            case "GIT_DIFF" -> gitToolService.diff(context, string(input, "workingDirectory", "."));
             default -> ToolExecutionResult.blocked("Unsupported action type: " + type);
         };
     }
