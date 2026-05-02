@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -111,5 +112,53 @@ public class ToolRecordRepository {
                 rs.getObject("finished_at", java.time.OffsetDateTime.class) == null
                         ? null : rs.getObject("finished_at", java.time.OffsetDateTime.class).toInstant()
         )).stream().findFirst();
+    }
+
+    /**
+     * Returns compact recent tool observations for the model's next action choice.
+     */
+    public List<String> findRecentSummariesByRun(UUID runId, int limit) {
+        return jdbc.query("""
+                select tc.tool_name, tr.success, tr.output_summary, tr.output_payload, tr.error_message
+                  from tool_result tr
+                  join tool_call tc on tc.id = tr.tool_call_id
+                  join agent_action aa on aa.id = tc.action_id
+                  join agent_step astep on astep.id = aa.step_id
+                 where astep.run_id = :runId
+                 order by tr.created_at desc, tr.id desc
+                 limit :limit
+                """, new MapSqlParameterSource()
+                .addValue("runId", runId)
+                .addValue("limit", limit), (rs, rowNum) -> {
+            var payload = json.toMap(rs.getString("output_payload"));
+            return rs.getString("tool_name") + " success=" + rs.getBoolean("success")
+                    + " summary=" + rs.getString("output_summary")
+                    + " payload=" + summarizePayload(payload)
+                    + (rs.getString("error_message") == null ? "" : " error=" + rs.getString("error_message"));
+        });
+    }
+
+    private Map<String, Object> summarizePayload(Map<String, Object> payload) {
+        if (payload == null || payload.isEmpty()) {
+            return Map.of();
+        }
+        return payload.entrySet().stream()
+                .limit(5)
+                .collect(java.util.stream.Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> summarizeValue(entry.getValue())));
+    }
+
+    private Object summarizeValue(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof String string) {
+            return string.length() <= 4000 ? string : string.substring(0, 4000);
+        }
+        if (value instanceof List<?> list) {
+            return list.size() <= 20 ? list : list.subList(0, 20);
+        }
+        return value;
     }
 }

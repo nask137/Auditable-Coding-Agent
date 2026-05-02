@@ -12,7 +12,8 @@ import java.util.Set;
  */
 @Component
 public class StructuredLlmOutputValidator {
-    private static final Set<String> ACTION_TYPES = Set.of("LIST_FILES", "READ_FILE", "SEARCH_TEXT", "CREATE_FILE");
+    private static final Set<String> ACTION_TYPES = Set.of("LIST_FILES", "READ_FILE", "SEARCH_TEXT", "CREATE_FILE",
+            "APPLY_PATCH", "GIT_STATUS", "GIT_DIFF");
 
     private final Validator validator;
 
@@ -68,6 +69,16 @@ public class StructuredLlmOutputValidator {
                 requireString(input, "path");
                 requireString(input, "content");
             }
+            case "APPLY_PATCH" -> {
+                requireString(input, "path");
+                requireString(input, "oldText");
+                requireStringValue(input, "newText");
+            }
+            case "GIT_STATUS", "GIT_DIFF" -> {
+                if (input.containsKey("workingDirectory")) {
+                    requireString(input, "workingDirectory");
+                }
+            }
             default -> throw new LlmGatewayException("Unsupported action type from model: " + type);
         }
     }
@@ -82,6 +93,12 @@ public class StructuredLlmOutputValidator {
         var value = input.get(key);
         if (!(value instanceof String string) || string.isBlank()) {
             throw new LlmGatewayException("Action input requires non-blank string field: " + key);
+        }
+    }
+
+    private void requireStringValue(Map<String, Object> input, String key) {
+        if (!(input.get(key) instanceof String)) {
+            throw new LlmGatewayException("Action input requires string field: " + key);
         }
     }
 

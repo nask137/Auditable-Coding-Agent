@@ -59,7 +59,7 @@ public class LlmPromptFactory {
                   "planItemId": "%s",
                   "actions": [
                     {
-                      "type": "LIST_FILES|READ_FILE|SEARCH_TEXT|CREATE_FILE",
+                      "type": "LIST_FILES|READ_FILE|SEARCH_TEXT|CREATE_FILE|APPLY_PATCH|GIT_STATUS|GIT_DIFF",
                       "reason": "why this tool intent is needed",
                       "input": {}
                     }
@@ -70,14 +70,22 @@ public class LlmPromptFactory {
                 READ_FILE: {"path": "relative/path"}
                 SEARCH_TEXT: {"query": "text"}
                 CREATE_FILE: {"path": "relative/path", "content": "full file content"}
+                APPLY_PATCH: {"path": "relative/path", "oldText": "exact existing text", "newText": "replacement text, may be empty"}
+                GIT_STATUS: {"workingDirectory": "."}
+                GIT_DIFF: {"workingDirectory": "."}
                 Return an empty actions array if no action is needed. The Runtime will reject unsupported types.
+                Use READ_FILE before APPLY_PATCH unless recent tool results already include the exact target content.
 
                 Current plan item:
                 %s
 
                 Observed workspace files:
                 %s
-                """.formatted(context.currentItem().id(), context.currentItem(), context.observedFiles()));
+
+                Recent tool results:
+                %s
+                """.formatted(context.currentItem().id(), context.currentItem(), context.observedFiles(),
+                context.recentToolResults()));
     }
 
     public LlmPrompt validationDecision(ValidationContext context) {
