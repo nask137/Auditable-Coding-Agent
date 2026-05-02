@@ -61,6 +61,22 @@ public class RuntimeFailureRepository {
                 .addValue("failureType", failureType), Integer.class);
     }
 
+    public int countByDecisionScope(UUID runId, UUID stepId, UUID planItemId, String failureType, String details) {
+        return jdbc.queryForObject("""
+                select count(*) from runtime_failure
+                 where run_id = :runId
+                   and step_id is not distinct from :stepId
+                   and plan_item_id is not distinct from :planItemId
+                   and failure_type = :failureType
+                   and details is not distinct from :details
+                """, new MapSqlParameterSource()
+                .addValue("runId", runId)
+                .addValue("stepId", stepId)
+                .addValue("planItemId", planItemId)
+                .addValue("failureType", failureType)
+                .addValue("details", details), Integer.class);
+    }
+
     public int countByRunAndStrategy(UUID runId, String strategy) {
         return jdbc.queryForObject("""
                 select count(*) from runtime_failure

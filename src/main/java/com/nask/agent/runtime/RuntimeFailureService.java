@@ -30,7 +30,7 @@ public class RuntimeFailureService {
     @Transactional
     public RuntimeFailure record(UUID taskId, UUID runId, UUID stepId, UUID planItemId,
                                  Domain.RuntimeFailureType type, String summary, String details) {
-        var decision = recoveryPolicy.decide(runId, type);
+        var decision = recoveryPolicy.decide(runId, stepId, planItemId, type, details);
         var eventId = auditService.append(new AuditEventDraft(taskId, runId, stepId, null,
                 Domain.AuditEventType.RuntimeRejected, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
                 type.name(), summary, List.of(), null, null, null, null, null, Domain.RiskLevel.MEDIUM,
