@@ -25,7 +25,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -72,6 +71,30 @@ class GitToolServiceTests {
         var result = service().status(context(workspaceDir, List.of()), ".");
 
         assertThat(result.blocked()).isTrue();
+    }
+
+    @Test
+    void gitDiffKeepsPatchContentWhenWorkingDirectoryIsSubdirectory() throws Exception {
+        assumeTrue(run(null, "git", "--version") == 0);
+        workspaceDir = TestFiles.createTempDirectory("agent-git-tool-");
+        var sourceDir = Files.createDirectories(workspaceDir.resolve("src/main/java"));
+        Files.writeString(sourceDir.resolve("App.java"), "class App { String value() { return \"old\"; } }\n");
+        assertThat(run(workspaceDir, "git", "init")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "user.email", "test@example.com")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "user.name", "Test User")).isZero();
+        assertThat(run(workspaceDir, "git", "add", ".")).isZero();
+        assertThat(run(workspaceDir, "git", "commit", "-m", "init")).isZero();
+
+        Files.writeString(sourceDir.resolve("App.java"), "class App { String value() { return \"new\"; } }\n");
+
+        var result = service().diff(context(workspaceDir, List.of()), "src/main/java");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.payload().get("includedFiles")).isEqualTo(List.of("src/main/java/App.java"));
+        var output = result.payload().get("output").toString();
+        assertThat(output).contains("src/main/java/App.java");
+        assertThat(output).contains("-class App { String value() { return \"old\"; } }");
+        assertThat(output).contains("+class App { String value() { return \"new\"; } }");
     }
 
     private GitToolService service() {
