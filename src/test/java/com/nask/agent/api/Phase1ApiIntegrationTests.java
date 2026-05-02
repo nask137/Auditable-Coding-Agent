@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -30,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
                 "agent.llm.provider=stub",
                 "agent.llm.api-key="
         })
+@ActiveProfiles("test")
 class Phase1ApiIntegrationTests {
     Path workspaceDir;
 
@@ -51,6 +53,8 @@ class Phase1ApiIntegrationTests {
         workspaceDir = TestFiles.createTempDirectory("agent-api-workspace-");
         jdbc.execute("""
                 truncate table
+                  user_input_request,
+                  runtime_failure,
                   validation_result,
                   task_report,
                   audit_event,

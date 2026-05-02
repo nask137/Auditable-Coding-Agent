@@ -58,6 +58,15 @@ public class AgentStepService {
     }
 
     /**
+     * Pauses a step until a user-input request is answered.
+     */
+    public void markWaitingUserInput(UUID taskId, UUID runId, AgentStep step, String outputSummary) {
+        repository.markWaitingUserInput(step.id(), outputSummary);
+        auditService.append(AuditEventDraft.info(taskId, runId, step.id(), Domain.AuditEventType.AgentRunPaused,
+                Domain.AuditActor.RUNTIME, step.stepType(), outputSummary));
+    }
+
+    /**
      * Fails a step and appends an error audit event.
      */
     public void fail(UUID taskId, UUID runId, AgentStep step, String outputSummary) {

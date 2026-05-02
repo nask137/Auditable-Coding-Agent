@@ -20,6 +20,11 @@ public interface LlmGateway {
     AgentDecision decideNextAction(ExecutionContext context);
 
     /**
+     * Replans the current item after a runtime rejection or failed validation.
+     */
+    PlanDraft replan(ExecutionContext context, String failureSummary);
+
+    /**
      * Suggests whether and how to validate the completed work.
      */
     ValidationDecision suggestValidation(ValidationContext context);

@@ -58,9 +58,16 @@ public class HttpLlmGateway implements LlmGateway {
         var decision = invoke(context.taskId(), context.runId(), context.stepId(), "decide next action",
                 promptFactory.agentDecision(context), AgentDecision.class);
         if (!context.currentItem().id().equals(decision.planItemId())) {
-            throw new LlmGatewayException("Model decision planItemId does not match current plan item");
+            throw new LlmGatewayException("Model decision planItemId does not match current plan item",
+                    Domain.RuntimeFailureType.MODEL_DECISION_MISMATCH, "decide next action");
         }
         return decision;
+    }
+
+    @Override
+    public PlanDraft replan(ExecutionContext context, String failureSummary) {
+        return invoke(context.taskId(), context.runId(), context.stepId(), "replan after failure",
+                promptFactory.replan(context, failureSummary), PlanDraft.class);
     }
 
     @Override
@@ -86,10 +93,17 @@ public class HttpLlmGateway implements LlmGateway {
             return validated;
         } catch (JsonProcessingException e) {
             auditFailed(taskId, runId, stepId, decisionType, prompt, result, "PARSE_FAILED", e.getOriginalMessage());
-            throw new LlmGatewayException("Model output was not valid " + type.getSimpleName() + " JSON", e);
+            throw new LlmGatewayException("Model output was not valid " + type.getSimpleName() + " JSON", e,
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_PARSE_FAILED, decisionType);
+        } catch (LlmGatewayException e) {
+            var failureType = e.failureType() == null
+                    ? Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED : e.failureType();
+            auditFailed(taskId, runId, stepId, decisionType, prompt, result, failureType.name(), e.getMessage());
+            throw new LlmGatewayException(e.getMessage(), e, failureType, decisionType);
         } catch (RuntimeException e) {
             auditFailed(taskId, runId, stepId, decisionType, prompt, result, "MODEL_CALL_FAILED", e.getMessage());
-            throw e;
+            throw new LlmGatewayException("Model call failed: " + e.getMessage(), e,
+                    Domain.RuntimeFailureType.MODEL_CALL_FAILED, decisionType);
         }
     }
 

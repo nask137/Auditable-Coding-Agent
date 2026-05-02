@@ -60,6 +60,23 @@ class HttpLlmGatewayTests {
     }
 
     @Test
+    void wrapsRawClientFailuresForRuntimeRecovery() {
+        var auditService = mock(AuditService.class);
+        when(auditService.append(any())).thenReturn(UUID.randomUUID());
+        ChatCompletionClient client = prompt -> {
+            throw new IllegalStateException("connection reset");
+        };
+        var gateway = new HttpLlmGateway(new LlmPromptFactory(), client, new ObjectMapper(), validator, auditService);
+
+        assertThatThrownBy(() -> gateway.understandTask(new TaskContext(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), "create note")))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("Model call failed")
+                .extracting(error -> ((LlmGatewayException) error).failureType())
+                .isEqualTo(com.nask.agent.common.Domain.RuntimeFailureType.MODEL_CALL_FAILED);
+    }
+
+    @Test
     void auditsTaskUnderstandingWithRunAndStepCorrelation() {
         var auditService = mock(AuditService.class);
         when(auditService.append(any())).thenReturn(UUID.randomUUID());

@@ -67,6 +67,18 @@ public class AgentStepRepository {
     }
 
     /**
+     * Marks a step as paused while waiting for user input.
+     */
+    public void markWaitingUserInput(UUID id, String outputSummary) {
+        jdbc.update("""
+                update agent_step set status = :status, output_summary = :outputSummary, finished_at = null where id = :id
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("status", Domain.StepStatus.WAITING_USER_INPUT.name())
+                .addValue("outputSummary", outputSummary));
+    }
+
+    /**
      * Marks a step failed and stores its output summary.
      */
     public void fail(UUID id, String outputSummary) {

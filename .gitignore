@@ -36,3 +36,4 @@ build/
 
 ### properties ###
 application-dev.properties
+application-test.properties

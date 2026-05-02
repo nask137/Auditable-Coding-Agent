@@ -84,8 +84,44 @@ public class LlmPromptFactory {
 
                 Recent tool results:
                 %s
+
+                Runtime recovery notes:
+                %s
                 """.formatted(context.currentItem().id(), context.currentItem(), context.observedFiles(),
-                context.recentToolResults()));
+                context.recentToolResults(), context.recoveryNotes()));
+    }
+
+    public LlmPrompt replan(ExecutionContext context, String failureSummary) {
+        return new LlmPrompt("replan-after-failure-v1", SHARED_SYSTEM, """
+                Return json with this exact shape:
+                {
+                  "items": [
+                    {
+                      "description": "one small recovery step",
+                      "relatedFiles": ["relative/path"],
+                      "notes": "why this recovery step addresses the runtime rejection"
+                    }
+                  ]
+                }
+                Create 1 to 3 small recovery plan items. Do not repeat a rejected action.
+                Prefer reading current file contents before patching when the failure involved paths or patches.
+
+                Current failed plan item:
+                %s
+
+                Runtime rejection or validation failure:
+                %s
+
+                Observed workspace files:
+                %s
+
+                Recent tool results:
+                %s
+
+                Runtime recovery notes:
+                %s
+                """.formatted(context.currentItem(), failureSummary, context.observedFiles(),
+                context.recentToolResults(), context.recoveryNotes()));
     }
 
     public LlmPrompt validationDecision(ValidationContext context) {

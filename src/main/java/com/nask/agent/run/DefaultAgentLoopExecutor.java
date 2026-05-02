@@ -9,13 +9,19 @@ import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.file.FileToolService;
 import com.nask.agent.git.GitToolService;
 import com.nask.agent.llm.ExecutionContext;
+import com.nask.agent.llm.LlmGatewayException;
 import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.PlanningContext;
 import com.nask.agent.llm.TaskContext;
 import com.nask.agent.llm.ValidationContext;
 import com.nask.agent.plan.PlanItem;
+import com.nask.agent.plan.PlanView;
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.report.ReportService;
+import com.nask.agent.runtime.FailureClassifier;
+import com.nask.agent.runtime.RuntimeFailure;
+import com.nask.agent.runtime.RuntimeFailureService;
+import com.nask.agent.runtime.UserInputRequestService;
 import com.nask.agent.step.AgentStepService;
 import com.nask.agent.task.TaskService;
 import com.nask.agent.tool.ToolExecutionContext;
@@ -30,6 +36,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * Fixed Phase 1 implementation of the agent loop.
@@ -60,6 +67,9 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
     private final FileChangeRepository fileChangeRepository;
     private final CommandExecutionRepository commandExecutionRepository;
     private final ToolRecordRepository toolRecordRepository;
+    private final RuntimeFailureService runtimeFailureService;
+    private final FailureClassifier failureClassifier;
+    private final UserInputRequestService userInputRequestService;
 
     /**
      * Wires the executor to all domain services that own persistence and policy.
@@ -72,7 +82,10 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                                     ValidationService validationService, AgentSettings settings,
                                     FileChangeRepository fileChangeRepository,
                                     CommandExecutionRepository commandExecutionRepository,
-                                    ToolRecordRepository toolRecordRepository) {
+                                    ToolRecordRepository toolRecordRepository,
+                                    RuntimeFailureService runtimeFailureService,
+                                    FailureClassifier failureClassifier,
+                                    UserInputRequestService userInputRequestService) {
         this.runService = runService;
         this.taskService = taskService;
         this.workspaceService = workspaceService;
@@ -89,6 +102,9 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
         this.fileChangeRepository = fileChangeRepository;
         this.commandExecutionRepository = commandExecutionRepository;
         this.toolRecordRepository = toolRecordRepository;
+        this.runtimeFailureService = runtimeFailureService;
+        this.failureClassifier = failureClassifier;
+        this.userInputRequestService = userInputRequestService;
     }
 
     /**
@@ -117,13 +133,23 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             if (resumeApprovedPauseIfPresent(task, run, workspace)) {
                 return;
             }
+            var existingPlan = planService.findByRun(run.id());
+            if (existingPlan != null) {
+                resumeExistingPlan(task.id(), run.id(), workspace, existingPlan, List.of());
+                return;
+            }
 
             // Phase 1 keeps model interactions explicit and step-scoped so each
             // model-derived artifact can be correlated with a run timeline entry.
             log.debug("Run {} starting task understanding step", run.id());
             var understandStep = stepService.start(task.id(), run.id(), null, Domain.StepType.UNDERSTAND_TASK, "Understand task");
-            var understanding = llmGateway.understandTask(new TaskContext(task.id(), run.id(), understandStep.id(),
-                    workspace.id(), task.userRequest()));
+            var understanding = callModelWithRecovery(task.id(), run.id(), understandStep.id(), null,
+                    "understand task", () -> llmGateway.understandTask(new TaskContext(task.id(), run.id(), understandStep.id(),
+                            workspace.id(), task.userRequest())));
+            if (understanding == null) {
+                stepService.markWaitingUserInput(task.id(), run.id(), understandStep, "Waiting for user input");
+                return;
+            }
             stepService.complete(task.id(), run.id(), understandStep, understanding.summary());
             log.debug("Run {} completed task understanding: {}", run.id(), understanding.summary());
 
@@ -155,57 +181,19 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             var observedFiles = observedFiles(listed.payload());
             log.info("Run {} observed {} workspace files for planning", run.id(), observedFiles.size());
             var planStep = stepService.start(task.id(), run.id(), null, Domain.StepType.CREATE_PLAN, "Create plan");
-            var plan = planService.create(task.id(), run.id(), llmGateway.createPlan(
-                    new PlanningContext(task.id(), run.id(), understanding, observedFiles)));
+            var planDraft = callModelWithRecovery(task.id(), run.id(), planStep.id(), null, "create plan",
+                    () -> llmGateway.createPlan(new PlanningContext(task.id(), run.id(), understanding, observedFiles)));
+            if (planDraft == null) {
+                stepService.markWaitingUserInput(task.id(), run.id(), planStep, "Waiting for user input");
+                return;
+            }
+            var plan = planService.create(task.id(), run.id(), planDraft);
             stepService.complete(task.id(), run.id(), planStep, "Created " + plan.items().size() + " plan items");
             log.info("Run {} created plan {} with {} items", run.id(), plan.plan().id(), plan.items().size());
 
-            var executedSteps = 0;
-            PlanItem next;
-            while ((next = planService.nextPending(plan.plan().id())) != null) {
-                if (++executedSteps > settings.maxSteps()) {
-                    // A persisted plan can be malformed or unexpectedly long; the
-                    // runtime guard prevents an unbounded loop even if planning did
-                    // not respect expected limits.
-                    runService.fail(run.id(), task.id(), "Maximum agent step count exceeded");
-                    log.warn("Run {} exceeded maximum agent step count {}", run.id(), settings.maxSteps());
-                    return;
-                }
-                log.info("Run {} executing plan item {} ({}/{})", run.id(), next.id(), executedSteps, settings.maxSteps());
-                var result = executePlanItem(task.id(), run.id(), workspace, next, observedFiles);
-                if (result.waitingApproval()) {
-                    // The current plan item remains in progress so the timeline
-                    // shows exactly where user approval interrupted execution.
-                    log.info("Run {} paused while executing plan item {} awaiting approval: {}", run.id(), next.id(), result.summary());
-                    return;
-                }
-                if (result.blocked()) {
-                    planService.updateItemStatus(next.id(), Domain.PlanItemStatus.FAILED);
-                    runService.fail(run.id(), task.id(), result.summary());
-                    reportService.generate(task, run.id(), "Failed: " + result.summary());
-                    log.warn("Run {} blocked while executing plan item {}: {}", run.id(), next.id(), result.summary());
-                    return;
-                }
-                planService.updateItemStatus(next.id(), Domain.PlanItemStatus.COMPLETED);
-                log.info("Run {} completed plan item {}: {}", run.id(), next.id(), result.summary());
-            }
-
-            planService.updatePlanStatus(plan.plan().id(), Domain.PlanStatus.COMPLETED);
-            log.info("Run {} completed plan {}", run.id(), plan.plan().id());
-            var validationResult = validateIfNeeded(task.id(), run.id(), workspace);
-            if (validationResult.waitingApproval()) {
-                log.info("Run {} paused during validation awaiting approval: {}", run.id(), validationResult.summary());
+            if (!resumeExistingPlan(task.id(), run.id(), workspace, plan, observedFiles)) {
                 return;
             }
-            if (validationResult.blocked()) {
-                runService.fail(run.id(), task.id(), validationResult.summary());
-                reportService.generate(task, run.id(), "Failed validation: " + validationResult.summary());
-                log.warn("Run {} failed validation: {}", run.id(), validationResult.summary());
-                return;
-            }
-            reportService.generate(task, run.id(), validationResult.summary());
-            runService.complete(run.id(), task.id());
-            log.info("Run {} completed successfully: {}", run.id(), validationResult.summary());
         } catch (Exception e) {
             // Convert unexpected runtime failures into normal domain state so API
             // clients and audit readers get a report instead of only a stacktrace.
@@ -214,6 +202,63 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             runService.fail(run.id(), task.id(), reason);
             generateFailureReport(task, run.id(), reason);
         }
+    }
+
+    private boolean resumeExistingPlan(UUID taskId, UUID runId, com.nask.agent.workspace.Workspace workspace,
+                                       PlanView plan, List<String> observedFiles) {
+        var task = taskService.getRequired(taskId);
+        var executedSteps = 0;
+        PlanItem next;
+        while ((next = planService.nextPending(plan.plan().id())) != null) {
+                if (++executedSteps > settings.maxSteps()) {
+                    // A persisted plan can be malformed or unexpectedly long; the
+                    // runtime guard prevents an unbounded loop even if planning did
+                    // not respect expected limits.
+                    runService.fail(runId, taskId, "Maximum agent step count exceeded");
+                    log.warn("Run {} exceeded maximum agent step count {}", runId, settings.maxSteps());
+                    return false;
+                }
+                log.info("Run {} executing plan item {} ({}/{})", runId, next.id(), executedSteps, settings.maxSteps());
+                var result = executePlanItem(taskId, runId, workspace, plan, next, observedFiles);
+                if (result.waitingApproval()) {
+                    // The current plan item remains in progress so the timeline
+                    // shows exactly where user approval interrupted execution.
+                    log.info("Run {} paused while executing plan item {} awaiting approval: {}", runId, next.id(), result.summary());
+                    return false;
+                }
+                if (result.blocked()) {
+                    planService.updateItemStatus(next.id(), Domain.PlanItemStatus.FAILED);
+                    runService.fail(runId, taskId, result.summary());
+                    reportService.generate(task, runId, "Failed: " + result.summary());
+                    log.warn("Run {} blocked while executing plan item {}: {}", runId, next.id(), result.summary());
+                    return false;
+                }
+                if (!result.summary().contains("recovery plan appended")) {
+                    planService.updateItemStatus(next.id(), Domain.PlanItemStatus.COMPLETED);
+                }
+                log.info("Run {} completed plan item {}: {}", runId, next.id(), result.summary());
+            }
+
+            planService.updatePlanStatus(plan.plan().id(), Domain.PlanStatus.COMPLETED);
+            log.info("Run {} completed plan {}", runId, plan.plan().id());
+            var validationResult = validateIfNeeded(taskId, runId, workspace, plan);
+            if (validationResult.waitingApproval()) {
+                log.info("Run {} paused during validation awaiting approval: {}", runId, validationResult.summary());
+                return false;
+            }
+            if (validationResult.blocked()) {
+                runService.fail(runId, taskId, validationResult.summary());
+                reportService.generate(task, runId, "Failed validation: " + validationResult.summary());
+                log.warn("Run {} failed validation: {}", runId, validationResult.summary());
+                return false;
+            }
+            if (validationResult.summary().contains("recovery plan appended")) {
+                return resumeExistingPlan(taskId, runId, workspace, planService.getByRun(runId), observedFiles);
+            }
+            reportService.generate(task, runId, validationResult.summary());
+            runService.complete(runId, taskId);
+            log.info("Run {} completed successfully: {}", runId, validationResult.summary());
+            return true;
     }
 
     /**
@@ -278,11 +323,50 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
         return true;
     }
 
+    private <T> T callModelWithRecovery(UUID taskId, UUID runId, UUID stepId, UUID planItemId,
+                                        String decisionType, Supplier<T> supplier) {
+        while (true) {
+            try {
+                return supplier.get();
+            } catch (LlmGatewayException e) {
+                var failure = runtimeFailureService.record(taskId, runId, stepId, planItemId,
+                        failureClassifier.fromModelException(e), e.getMessage(), decisionType);
+                if (Domain.RecoveryStrategy.RETRY_SAME_ACTION.name().equals(failure.strategy())) {
+                    log.info("Retrying model decision {} for run {} after {}", decisionType, runId, failure.failureType());
+                    continue;
+                }
+                if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                    askUser(taskId, runId, stepId, planItemId, failure);
+                    return null;
+                }
+                throw e;
+            }
+        }
+    }
+
+    private void askUser(UUID taskId, UUID runId, UUID stepId, UUID planItemId, RuntimeFailure failure) {
+        userInputRequestService.create(taskId, runId, stepId, planItemId,
+                "Runtime recovery needs guidance for " + failure.failureType(),
+                failure.summary(), List.of("Retry with corrected model output", "Adjust task instructions", "Cancel task"));
+    }
+
+    private List<String> recoveryNotes(UUID runId) {
+        return runtimeFailureService.findByRun(runId).stream()
+                .map(failure -> failure.failureType() + ": " + failure.summary())
+                .limit(5)
+                .toList();
+    }
+
     /**
      * Asks the gateway for a validation command and records its result when run.
      */
-    private ToolExecutionResult validateIfNeeded(UUID taskId, UUID runId, com.nask.agent.workspace.Workspace workspace) {
-        var validation = llmGateway.suggestValidation(new ValidationContext(taskId, runId, workspace.id()));
+    private ToolExecutionResult validateIfNeeded(UUID taskId, UUID runId, com.nask.agent.workspace.Workspace workspace,
+                                                 PlanView plan) {
+        var validation = callModelWithRecovery(taskId, runId, null, null, "suggest validation",
+                () -> llmGateway.suggestValidation(new ValidationContext(taskId, runId, workspace.id())));
+        if (validation == null) {
+            return ToolExecutionResult.waiting(null, "Waiting for user input");
+        }
         if (!validation.shouldValidate() || validation.executableAndArgs().isEmpty()) {
             return ToolExecutionResult.success("Task completed. No validation command selected.", Map.of());
         }
@@ -307,20 +391,46 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
         var commandId = uuid(result.payload().get("commandId"));
         validationService.record(taskId, runId, step.id(), commandId, Domain.ValidationType.TEST, exitCode == 0, result.summary());
         stepService.complete(taskId, runId, step, result.summary());
-        return exitCode == 0
-                ? ToolExecutionResult.success("Task completed. Validation passed: " + result.summary(), result.payload())
-                : ToolExecutionResult.blocked("Validation failed: " + result.summary());
+        if (exitCode == 0) {
+            return ToolExecutionResult.success("Task completed. Validation passed: " + result.summary(), result.payload());
+        }
+        var failure = runtimeFailureService.record(taskId, runId, step.id(), null,
+                Domain.RuntimeFailureType.VALIDATION_FAILED, "Validation failed: " + result.summary(), result.summary());
+        if (Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN.name().equals(failure.strategy())) {
+            var recoveryDraft = callModelWithRecovery(taskId, runId, step.id(), null, "replan after validation failure",
+                    () -> llmGateway.replan(new ExecutionContext(taskId, runId, step.id(),
+                            plan.items().isEmpty() ? null : plan.items().getLast(), List.of(),
+                            toolRecordRepository.findRecentSummariesByRun(runId, 8),
+                            recoveryNotes(runId)), result.summary()));
+            if (recoveryDraft != null) {
+                planService.updatePlanStatus(plan.plan().id(), Domain.PlanStatus.ACTIVE);
+                planService.appendRecoveryItems(taskId, runId, plan.plan().id(), recoveryDraft, null,
+                        result.summary(), failure.id());
+                return ToolExecutionResult.success("Validation failed; recovery plan appended", result.payload());
+            }
+            return ToolExecutionResult.waiting(null, "Waiting for user input");
+        }
+        if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+            askUser(taskId, runId, step.id(), null, failure);
+            stepService.markWaitingUserInput(taskId, runId, step, failure.summary());
+            return ToolExecutionResult.waiting(null, "Waiting for user input");
+        }
+        return ToolExecutionResult.blocked("Validation failed: " + result.summary());
     }
 
     /**
      * Executes one plan item by asking the gateway for tool actions.
      */
     private ToolExecutionResult executePlanItem(UUID taskId, UUID runId, com.nask.agent.workspace.Workspace workspace,
-                                                PlanItem item, List<String> observedFiles) {
+                                                PlanView plan, PlanItem item, List<String> observedFiles) {
         planService.updateItemStatus(item.id(), Domain.PlanItemStatus.IN_PROGRESS);
         var step = stepService.start(taskId, runId, item.id(), Domain.StepType.EXECUTE_PLAN_ITEM, item.description());
-        var decision = llmGateway.decideNextAction(new ExecutionContext(taskId, runId, step.id(), item, observedFiles,
-                toolRecordRepository.findRecentSummariesByRun(runId, 8)));
+        AgentDecisionResult decisionResult = decideNextActionWithRecovery(taskId, runId, plan, item, observedFiles,
+                step);
+        if (decisionResult.result() != null) {
+            return decisionResult.result();
+        }
+        var decision = decisionResult.decision();
         ToolExecutionResult last = ToolExecutionResult.success("No action required", Map.of());
         for (var actionDraft : decision.actions()) {
             // Each model action becomes an auditable domain action before a tool
@@ -333,12 +443,87 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                 return last;
             }
             if (last.blocked()) {
+                var blockedSummary = last.summary();
+                var failure = runtimeFailureService.record(taskId, runId, step.id(), item.id(),
+                        failureClassifier.fromToolResult(last), blockedSummary, blockedSummary);
+                if (Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name().equals(failure.strategy())) {
+                    var recoveryDraft = callModelWithRecovery(taskId, runId, step.id(), item.id(),
+                            "replan current item", () -> llmGateway.replan(new ExecutionContext(taskId, runId,
+                                    step.id(), item, observedFiles, toolRecordRepository.findRecentSummariesByRun(runId, 8),
+                                    recoveryNotes(runId)), blockedSummary));
+                    if (recoveryDraft != null) {
+                        planService.updateItemStatus(item.id(), Domain.PlanItemStatus.FAILED);
+                        planService.appendRecoveryItems(taskId, runId, plan.plan().id(), recoveryDraft, item.id(),
+                                blockedSummary, failure.id());
+                        stepService.complete(taskId, runId, step, "Runtime rejected action; recovery plan appended");
+                        return ToolExecutionResult.success("Runtime rejected action; recovery plan appended", Map.of());
+                    }
+                    stepService.markWaitingUserInput(taskId, runId, step, "Waiting for user input");
+                    return ToolExecutionResult.waiting(null, "Waiting for user input");
+                }
+                if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                    askUser(taskId, runId, step.id(), item.id(), failure);
+                    stepService.markWaitingUserInput(taskId, runId, step, failure.summary());
+                    return ToolExecutionResult.waiting(null, "Waiting for user input");
+                }
                 stepService.complete(taskId, runId, step, last.summary());
                 return last;
             }
         }
         stepService.complete(taskId, runId, step, last.summary());
         return last;
+    }
+
+    private AgentDecisionResult decideNextActionWithRecovery(UUID taskId, UUID runId, PlanView plan, PlanItem item,
+                                                             List<String> observedFiles,
+                                                             com.nask.agent.step.AgentStep step) {
+        while (true) {
+            try {
+                var decision = llmGateway.decideNextAction(new ExecutionContext(taskId, runId, step.id(), item,
+                        observedFiles, toolRecordRepository.findRecentSummariesByRun(runId, 8), recoveryNotes(runId)));
+                return new AgentDecisionResult(decision, null);
+            } catch (LlmGatewayException e) {
+                var failure = runtimeFailureService.record(taskId, runId, step.id(), item.id(),
+                        failureClassifier.fromModelException(e), e.getMessage(), "decide next action");
+                if (Domain.RecoveryStrategy.RETRY_SAME_ACTION.name().equals(failure.strategy())) {
+                    log.info("Retrying model decision decide next action for run {} after {}", runId,
+                            failure.failureType());
+                    continue;
+                }
+                if (Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name().equals(failure.strategy())) {
+                    return new AgentDecisionResult(null, replanCurrentItem(taskId, runId, plan, item, observedFiles,
+                            step, failure, e.getMessage()));
+                }
+                if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                    askUser(taskId, runId, step.id(), item.id(), failure);
+                    stepService.markWaitingUserInput(taskId, runId, step, failure.summary());
+                    return new AgentDecisionResult(null, ToolExecutionResult.waiting(null, "Waiting for user input"));
+                }
+                stepService.complete(taskId, runId, step, failure.summary());
+                return new AgentDecisionResult(null, ToolExecutionResult.blocked(failure.summary()));
+            }
+        }
+    }
+
+    private ToolExecutionResult replanCurrentItem(UUID taskId, UUID runId, PlanView plan, PlanItem item,
+                                                  List<String> observedFiles, com.nask.agent.step.AgentStep step,
+                                                  RuntimeFailure failure, String failureSummary) {
+        var recoveryDraft = callModelWithRecovery(taskId, runId, step.id(), item.id(),
+                "replan current item", () -> llmGateway.replan(new ExecutionContext(taskId, runId,
+                        step.id(), item, observedFiles, toolRecordRepository.findRecentSummariesByRun(runId, 8),
+                        recoveryNotes(runId)), failureSummary));
+        if (recoveryDraft != null) {
+            planService.updateItemStatus(item.id(), Domain.PlanItemStatus.FAILED);
+            planService.appendRecoveryItems(taskId, runId, plan.plan().id(), recoveryDraft, item.id(),
+                    failureSummary, failure.id());
+            stepService.complete(taskId, runId, step, "Runtime rejected action; recovery plan appended");
+            return ToolExecutionResult.success("Runtime rejected action; recovery plan appended", Map.of());
+        }
+        stepService.markWaitingUserInput(taskId, runId, step, "Waiting for user input");
+        return ToolExecutionResult.waiting(null, "Waiting for user input");
+    }
+
+    private record AgentDecisionResult(com.nask.agent.llm.AgentDecision decision, ToolExecutionResult result) {
     }
 
     /**

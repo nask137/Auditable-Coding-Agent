@@ -87,18 +87,28 @@ public class PlanRepository {
     }
 
     /**
-     * Returns the next pending item according to {@code order_index}.
+     * Returns the next runnable item according to {@code order_index}.
      */
     public Optional<PlanItem> findNextPendingItem(UUID planId) {
         return jdbc.query("""
                         select * from plan_item
-                         where plan_id = :planId and status = :status
+                         where plan_id = :planId and status in (:statuses)
                          order by order_index
                          limit 1
                         """, new MapSqlParameterSource()
                         .addValue("planId", planId)
-                        .addValue("status", Domain.PlanItemStatus.PENDING.name()),
+                        .addValue("statuses", List.of(Domain.PlanItemStatus.PENDING.name(),
+                                Domain.PlanItemStatus.IN_PROGRESS.name())),
                 itemMapper()).stream().findFirst();
+    }
+
+    /**
+     * Returns the highest order index currently used by a plan.
+     */
+    public int maxOrderIndex(UUID planId) {
+        var value = jdbc.queryForObject("select coalesce(max(order_index), 0) from plan_item where plan_id = :planId",
+                new MapSqlParameterSource("planId", planId), Integer.class);
+        return value == null ? 0 : value;
     }
 
     /**

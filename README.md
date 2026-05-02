@@ -2,7 +2,7 @@
 
 Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服务。项目目标不是做一个只会聊天的 Agent，而是把编码任务拆成可追踪的步骤：理解任务、检查 workspace、生成计划、调用受控工具、记录文件变更、执行验证命令、处理审批，并生成任务报告。
 
-当前代码对应“阶段 1：单 Agent 执行闭环”MVP。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、固定 Agent Loop、基础文件工具、命令审批、审计事件、任务报告和轻量 CLI。LLM 侧默认使用 `StubLlmGateway` 验证 Runtime 闭环，也可以通过 HTTP 网关接入 DeepSeek/OpenAI-compatible 模型，让模型只输出结构化任务理解、计划和工具动作意图。
+当前代码已从“阶段 1：单 Agent 执行闭环”推进到“阶段 2：可审计运行时”的基础版本。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、固定 Agent Loop、基础文件工具、命令审批、审计事件、结构化失败记录、恢复策略、用户介入请求、任务报告和轻量 CLI。LLM 侧默认使用 `StubLlmGateway` 验证 Runtime 闭环，也可以通过 HTTP 网关接入 DeepSeek/OpenAI-compatible 模型，让模型只输出结构化任务理解、计划和工具动作意图。
 
 ## 当前能力
 
@@ -14,7 +14,9 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 - 通过命令工具执行受策略控制的 `run_command`。
 - 对白名单外命令、敏感文件、高影响文件或大范围修改创建审批请求。
 - 记录 AuditEvent、ToolCall、ToolResult、FileChange、CommandExecution、ApprovalRequest、ValidationResult 和 TaskReport。
-- 通过 REST API 和 picocli CLI 查看任务状态、事件、变更、审批和报告。
+- 记录 RuntimeFailure，并在模型输出、工具动作或验证被 Runtime 拒绝时选择重试、重新规划、请求用户介入或失败。
+- 创建 UserInputRequest，让任务进入 `WAITING_USER_INPUT` 并在用户回答后恢复运行。
+- 通过 REST API 和 picocli CLI 查看任务状态、事件、变更、失败、审批、用户输入请求和报告。
 
 ## 技术栈
 
@@ -49,6 +51,7 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 │   ├── plan/                      # Plan / PlanItem
 │   ├── report/                    # 任务报告
 │   ├── run/                       # AgentRun 和固定 Agent Loop
+│   ├── runtime/                   # 阶段 2 失败恢复和用户介入
 │   ├── step/                      # AgentStep
 │   ├── task/                      # CodingTask
 │   ├── tool/                      # ToolCall / ToolResult
@@ -113,6 +116,9 @@ agent.loop.max-tool-calls=50
 agent.loop.max-file-changes=5
 agent.loop.max-patch-lines=300
 agent.loop.max-consecutive-failures=3
+agent.loop.max-model-retries=2
+agent.loop.max-replan-attempts=2
+agent.loop.max-user-input-requests-per-run=3
 agent.command.timeout-seconds=120
 agent.file.max-read-bytes=200000
 ```
@@ -207,6 +213,7 @@ $taskId = $run.taskId
 ```powershell
 agent status $taskId
 agent events $taskId
+agent failures $taskId
 agent diff $taskId
 agent report $taskId
 ```
@@ -237,6 +244,29 @@ agent deny <approvalId>
 
 批准后后端会恢复同步阶段 1 Loop；拒绝后关联任务会失败，并记录审批拒绝事件。
 
+### 用户介入流程
+
+当真实模型输出连续被 Runtime 拒绝、工具动作无法安全恢复，或验证失败恢复预算耗尽时，任务会进入 `WAITING_USER_INPUT`。
+
+查看待处理用户输入请求：
+
+```powershell
+agent inputs
+agent input <requestId>
+```
+
+回答并恢复任务：
+
+```powershell
+agent answer <requestId> --text "请优先读取 README.md 和 pom.xml 后重新规划"
+```
+
+取消用户输入请求会让关联任务失败：
+
+```powershell
+agent cancel-input <requestId>
+```
+
 ## REST API
 
 主要 API：
@@ -257,12 +287,18 @@ GET  /api/runs/{runId}/steps
 
 GET  /api/tasks/{taskId}/events
 GET  /api/tasks/{taskId}/changes
+GET  /api/tasks/{taskId}/failures
 GET  /api/tasks/{taskId}/report
 
 GET  /api/approvals
 GET  /api/approvals/{approvalId}
 POST /api/approvals/{approvalId}/approve
 POST /api/approvals/{approvalId}/deny
+
+GET  /api/user-input-requests
+GET  /api/user-input-requests/{requestId}
+POST /api/user-input-requests/{requestId}/answer
+POST /api/user-input-requests/{requestId}/cancel
 
 GET    /api/workspaces/{workspaceId}/command-policies
 POST   /api/workspaces/{workspaceId}/command-policies
@@ -297,6 +333,7 @@ mvn test
 - 敏感文件识别和 symlink 越界拦截。
 - diff 和 hash 生成。
 - 审批请求消费规则。
+- 恢复策略选择和恢复预算。
 - 阶段 1 API 集成闭环：注册 workspace、添加命令白名单、启动任务、创建 `AGENT_TASK_NOTE.md`、记录审计事件、记录文件变更并生成报告。
 
 集成测试依赖可用的 PostgreSQL 数据源；默认读取 `application.properties` 中的连接配置。
@@ -314,11 +351,12 @@ mvn test
 - `docs/step1/phase1-technical-design.md`：阶段 1 技术设计。
 - `docs/step1/phase1-work-plan.md`：阶段 1 工作计划。
 - `docs/step1/phase1-cli-test-guide.md`：CLI 手工测试指南。
+- `docs/step2/phase2-work-plan.md`：阶段 2 工作计划和实现范围。
 
 ## 当前限制
 
 - 默认 LLM 实现是 `StubLlmGateway`，固定生成三步计划；配置 `AGENT_LLM_PROVIDER=http` 后可使用真实模型，但模型输出仍受结构化解析、Bean Validation 和动作白名单约束。
-- 阶段 1 Agent Loop 是同步执行；后台任务队列、WebSocket/SSE 推送和多实例协调尚未实现。
+- Agent Loop 仍是同步执行；后台任务队列、WebSocket/SSE 推送和多实例协调尚未实现。
 - CLI 输出原始 JSON，尚未做表格化、分页、高亮或交互式审批。
 - 目前没有 Web 控制台、IDE 插件、多 Agent、长期记忆、RAG 或工作流 DSL。
 - 文件修改能力已有审计和审批基础，但 Stub Loop 目前只演示创建 `AGENT_TASK_NOTE.md`，不会自动修改业务源码。
@@ -336,4 +374,4 @@ mvn test
 阶段 6：多 Agent、插件化与产品化
 ```
 
-短期最重要的下一步是扩展失败恢复和事件流模型，并在真实模型输出被 Runtime 拒绝时支持重新规划或请求用户介入。
+短期最重要的下一步是继续强化阶段 2 的真实模型恢复场景测试，并把固定 Loop 抽象为阶段 3 的状态机与工作流内核。

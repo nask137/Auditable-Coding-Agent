@@ -63,6 +63,15 @@ public class PlanService {
     }
 
     /**
+     * Returns the latest plan for a run, or null when planning has not happened.
+     */
+    public PlanView findByRun(UUID runId) {
+        return repository.findByRun(runId)
+                .map(plan -> new PlanView(plan, repository.findItems(plan.id())))
+                .orElse(null);
+    }
+
+    /**
      * Returns the next pending item or null when the plan is exhausted.
      */
     public PlanItem nextPending(UUID planId) {
@@ -81,5 +90,33 @@ public class PlanService {
      */
     public void updatePlanStatus(UUID planId, Domain.PlanStatus status) {
         repository.updatePlanStatus(planId, status);
+    }
+
+    /**
+     * Appends recovery plan items after the current plan tail.
+     */
+    @Transactional
+    public List<PlanItem> appendRecoveryItems(UUID taskId, UUID runId, UUID planId, PlanDraft draft,
+                                              UUID failedItemId, String reason, UUID failureId) {
+        var now = Instant.now();
+        var order = repository.maxOrderIndex(planId);
+        var items = new ArrayList<PlanItem>();
+        for (var draftItem : draft.items()) {
+            items.add(repository.insertItem(new PlanItem(UUID.randomUUID(), planId, draftItem.description(),
+                    Domain.PlanItemStatus.PENDING.name(), draftItem.relatedFiles(), draftItem.notes(), ++order, now, now)));
+        }
+        auditService.append(new AuditEventDraft(taskId, runId, null, null, Domain.AuditEventType.PlanUpdated,
+                Domain.AuditActor.RUNTIME, Domain.AuditLevel.INFO, "Append recovery plan items",
+                "Appended " + items.size() + " recovery plan items", List.of(), null, null, null, null,
+                null, Domain.RiskLevel.MEDIUM, null, true, null, null, java.util.Map.of(
+                "planId", planId.toString(),
+                "failedItemId", failedItemId == null ? "" : failedItemId.toString(),
+                "failureId", failureId == null ? "" : failureId.toString(),
+                "reason", reason)));
+        auditService.append(new AuditEventDraft(taskId, runId, null, null, Domain.AuditEventType.RecoveryReplanned,
+                Domain.AuditActor.RUNTIME, Domain.AuditLevel.INFO, "Replan after failure", reason,
+                List.of(), null, null, null, null, null, Domain.RiskLevel.MEDIUM, null,
+                true, null, null, java.util.Map.of("newItemCount", items.size())));
+        return items;
     }
 }

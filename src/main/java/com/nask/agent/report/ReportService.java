@@ -6,6 +6,7 @@ import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.llm.FinalReportDraft;
 import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.ReportContext;
+import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.task.CodingTask;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -22,16 +23,19 @@ public class ReportService {
     private final LlmGateway llmGateway;
     private final FileChangeRepository fileChangeRepository;
     private final AuditService auditService;
+    private final RuntimeFailureService runtimeFailureService;
 
     /**
      * Creates a report service.
      */
     public ReportService(TaskReportRepository repository, LlmGateway llmGateway,
-                         FileChangeRepository fileChangeRepository, AuditService auditService) {
+                         FileChangeRepository fileChangeRepository, AuditService auditService,
+                         RuntimeFailureService runtimeFailureService) {
         this.repository = repository;
         this.llmGateway = llmGateway;
         this.fileChangeRepository = fileChangeRepository;
         this.auditService = auditService;
+        this.runtimeFailureService = runtimeFailureService;
     }
 
     /**
@@ -41,11 +45,16 @@ public class ReportService {
         FinalReportDraft draft = llmGateway.generateReport(new ReportContext(task.id(), runId, task.userRequest(), resultSummary));
         var changes = fileChangeRepository.findByTask(task.id());
         var events = auditService.eventsForTask(task.id());
+        var failures = runtimeFailureService.findByTask(task.id());
         // The LLM drafts the narrative, while deterministic sections append the
         // exact file-change and audit trails stored by the runtime.
         var content = draft.markdown()
                 + "\n## File Changes\n\n"
                 + changes.stream().map(change -> "- `%s` %s".formatted(change.path(), change.changeType()))
+                .reduce("", (a, b) -> a + b + "\n")
+                + "\n## Failure and Recovery\n\n"
+                + failures.stream().map(failure -> "- `%s` strategy `%s`: %s"
+                        .formatted(failure.failureType(), failure.strategy(), failure.summary()))
                 .reduce("", (a, b) -> a + b + "\n")
                 + "\n## Audit Events\n\n"
                 + events.stream().map(event -> "- %s `%s`".formatted(event.occurredAt(), event.eventType()))
