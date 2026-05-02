@@ -1,6 +1,7 @@
 package com.nask.agent.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nask.agent.audit.AuditEventDraft;
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.plan.PlanItem;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -55,5 +57,29 @@ class HttpLlmGatewayTests {
                 UUID.randomUUID(), item, List.of())))
                 .isInstanceOf(LlmGatewayException.class)
                 .hasMessageContaining("Unsupported action type");
+    }
+
+    @Test
+    void auditsTaskUnderstandingWithRunAndStepCorrelation() {
+        var auditService = mock(AuditService.class);
+        when(auditService.append(any())).thenReturn(UUID.randomUUID());
+        ChatCompletionClient client = prompt -> new ChatCompletionResult("deepseek-v4-pro",
+                "{\"summary\":\"Create note\",\"taskType\":\"CODE_EDIT\",\"constraints\":[],\"initialSearchHints\":[]}",
+                "stop", 1, 2, 3);
+        var gateway = new HttpLlmGateway(new LlmPromptFactory(), client, new ObjectMapper(), validator, auditService);
+        var taskId = UUID.randomUUID();
+        var runId = UUID.randomUUID();
+        var stepId = UUID.randomUUID();
+
+        gateway.understandTask(new TaskContext(taskId, runId, stepId, UUID.randomUUID(), "create note"));
+
+        var captor = forClass(AuditEventDraft.class);
+        verify(auditService, times(2)).append(captor.capture());
+        assertThat(captor.getAllValues())
+                .allSatisfy(event -> {
+                    assertThat(event.taskId()).isEqualTo(taskId);
+                    assertThat(event.runId()).isEqualTo(runId);
+                    assertThat(event.stepId()).isEqualTo(stepId);
+                });
     }
 }

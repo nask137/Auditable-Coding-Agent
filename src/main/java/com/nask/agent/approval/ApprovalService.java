@@ -5,6 +5,7 @@ import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.ApiException;
 import com.nask.agent.common.Domain;
 import com.nask.agent.run.AgentRunService;
+import com.nask.agent.step.AgentStepService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,14 +24,17 @@ public class ApprovalService {
     private final ApprovalRepository repository;
     private final AuditService auditService;
     private final AgentRunService runService;
+    private final AgentStepService stepService;
 
     /**
      * Creates an approval service.
      */
-    public ApprovalService(ApprovalRepository repository, AuditService auditService, AgentRunService runService) {
+    public ApprovalService(ApprovalRepository repository, AuditService auditService, AgentRunService runService,
+                           AgentStepService stepService) {
         this.repository = repository;
         this.auditService = auditService;
         this.runService = runService;
+        this.stepService = stepService;
     }
 
     /**
@@ -134,6 +138,10 @@ public class ApprovalService {
                 "Deny request", reason, approval.affectedFiles(), null, approval.id(), null, null,
                 null, Domain.RiskLevel.valueOf(approval.riskLevel()), Domain.ApprovalStatus.DENIED, true,
                 null, null, Map.of()));
+        if (approval.stepId() != null) {
+            stepService.fail(approval.taskId(), approval.runId(), stepService.getRequired(approval.stepId()),
+                    "Approval denied: " + reason);
+        }
         runService.fail(approval.runId(), approval.taskId(), "Approval denied: " + reason);
         return getRequired(id);
     }

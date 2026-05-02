@@ -43,7 +43,7 @@ public class HttpLlmGateway implements LlmGateway {
 
     @Override
     public TaskUnderstanding understandTask(TaskContext context) {
-        return invoke(context.taskId(), null, null, "understand task",
+        return invoke(context.taskId(), context.runId(), context.stepId(), "understand task",
                 promptFactory.taskUnderstanding(context), TaskUnderstanding.class);
     }
 
