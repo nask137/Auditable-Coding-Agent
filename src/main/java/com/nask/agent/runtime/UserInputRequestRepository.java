@@ -68,6 +68,15 @@ public class UserInputRequestRepository {
                 new MapSqlParameterSource("runId", runId), Integer.class);
     }
 
+    public int countPendingByRun(UUID runId) {
+        return jdbc.queryForObject("""
+                select count(*) from user_input_request
+                 where run_id = :runId and status = :status
+                """, new MapSqlParameterSource()
+                .addValue("runId", runId)
+                .addValue("status", Domain.UserInputStatus.PENDING.name()), Integer.class);
+    }
+
     public void answer(UUID id, String answer) {
         jdbc.update("""
                 update user_input_request
