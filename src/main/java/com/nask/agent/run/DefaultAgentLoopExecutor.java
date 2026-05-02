@@ -115,7 +115,8 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             // model-derived artifact can be correlated with a run timeline entry.
             log.debug("Run {} starting task understanding step", run.id());
             var understandStep = stepService.start(task.id(), run.id(), null, Domain.StepType.UNDERSTAND_TASK, "Understand task");
-            var understanding = llmGateway.understandTask(new TaskContext(task.id(), workspace.id(), task.userRequest()));
+            var understanding = llmGateway.understandTask(new TaskContext(task.id(), run.id(), understandStep.id(),
+                    workspace.id(), task.userRequest()));
             stepService.complete(task.id(), run.id(), understandStep, understanding.summary());
             log.debug("Run {} completed task understanding: {}", run.id(), understanding.summary());
 

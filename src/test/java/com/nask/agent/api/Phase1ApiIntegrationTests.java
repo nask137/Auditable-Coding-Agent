@@ -192,6 +192,43 @@ class Phase1ApiIntegrationTests {
                 .count()).isEqualTo(1);
     }
 
+    @Test
+    void denyingValidationCommandFailsPausedStep() throws Exception {
+        Files.writeString(workspaceDir.resolve("README.md"), "approval deny workspace");
+
+        var workspace = post("/api/workspaces", Map.of(
+                "name", "approval-deny",
+                "rootPath", workspaceDir.toString(),
+                "trusted", true));
+        var workspaceId = workspace.get("id").toString();
+
+        var task = post("/api/tasks", Map.of(
+                "workspaceId", workspaceId,
+                "title", "approval deny task",
+                "userRequest", "create an audited note and validate"));
+        var taskId = task.get("id").toString();
+
+        var run = post("/api/tasks/" + taskId + "/start", null);
+        var runId = run.get("id").toString();
+
+        assertThat(run.get("status")).isEqualTo("WAITING_APPROVAL");
+        assertThat(jdbc.queryForObject(
+                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
+
+        var approvals = getList("/api/approvals?status=PENDING");
+        assertThat(approvals).hasSize(1);
+        var approvalId = approvals.getFirst().get("id").toString();
+
+        post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "test", "reason", "not needed"));
+
+        var failedRun = getMap("/api/runs/" + runId);
+        assertThat(failedRun.get("status")).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject(
+                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                String.class, java.util.UUID.fromString(runId))).isEqualTo("FAILED");
+    }
+
     private Map<String, Object> post(String path, Object body) {
         try {
             var json = body == null ? "" : objectMapper.writeValueAsString(body);
