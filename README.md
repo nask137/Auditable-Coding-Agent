@@ -99,9 +99,9 @@ docker start agent-postgres
 默认配置位于 `src/main/resources/application.properties`。常用环境变量：
 
 ```powershell
-$env:AGENT_DATASOURCE_URL='jdbc:postgresql://localhost:5432/auditable_agent'
-$env:AGENT_DATASOURCE_USERNAME='username'
-$env:AGENT_DATASOURCE_PASSWORD='password'
+$env:DATASOURCE_URL='jdbc:postgresql://localhost:5432/auditable_agent'
+$env:DATASOURCE_USERNAME='username'
+$env:DATASOURCE_PASSWORD='password'
 ```
 
 主要运行时限制：
@@ -127,7 +127,7 @@ $env:AGENT_LLM_THINKING_ENABLED='false'
 $env:AGENT_LLM_REASONING_EFFORT='high'
 ```
 
-HTTP 网关调用 `/chat/completions`，使用 JSON output mode。DeepSeek thinking mode 默认显式启用，可通过 `AGENT_LLM_THINKING_ENABLED=false` 关闭，或用 `AGENT_LLM_REASONING_EFFORT=high|max` 调整 effort。模型只返回结构化意图，实际文件和命令操作仍经过 Runtime 校验、审批和审计。
+HTTP 网关调用 `/chat/completions`，使用 JSON output mode。DeepSeek thinking mode 默认禁用，可通过 `AGENT_LLM_THINKING_ENABLED=true` 开启，或用 `AGENT_LLM_REASONING_EFFORT=high|max` 调整 effort。模型只返回结构化意图，实际文件和命令操作仍经过 Runtime 校验、审批和审计。
 
 ## 启动服务
 
