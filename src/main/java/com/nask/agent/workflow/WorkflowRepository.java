@@ -109,10 +109,10 @@ public class WorkflowRepository {
         return execution;
     }
 
-    public void updateNodeExecutionForStep(UUID runId, UUID stepId, String status, String inputSummary,
+    public int updateNodeExecutionForStep(UUID runId, UUID stepId, String status, String inputSummary,
                                            String outputSummary, java.time.Instant completedAt,
                                            Map<String, Object> metadata) {
-        jdbc.update("""
+        return jdbc.update("""
                 update workflow_node_execution
                    set status = :status,
                        input_summary = :inputSummary,

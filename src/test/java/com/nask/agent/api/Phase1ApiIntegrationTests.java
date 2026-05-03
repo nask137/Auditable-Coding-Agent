@@ -429,6 +429,65 @@ class Phase1ApiIntegrationTests {
         assertThat(getList("/api/runs/" + runId + "/workflow/nodes"))
                 .extracting(node -> node.get("nodeId"))
                 .contains("validate", "report", "finish");
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from workflow_node_execution
+                 where run_id = ?
+                   and node_id = 'validate'
+                """, Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                select status
+                  from workflow_node_execution
+                 where run_id = ?
+                   and node_id = 'validate'
+                """, String.class, java.util.UUID.fromString(runId))).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    void denyingTestWorkflowValidationUpdatesWorkflowNode() throws Exception {
+        Files.writeString(workspaceDir.resolve("README.md"), "test workflow deny workspace");
+
+        var workspace = post("/api/workspaces", Map.of(
+                "name", "test-workflow-deny",
+                "rootPath", workspaceDir.toString(),
+                "trusted", true));
+        var workspaceId = workspace.get("id").toString();
+
+        var task = post("/api/tasks", Map.of(
+                "workspaceId", workspaceId,
+                "title", "test workflow deny task",
+                "userRequest", "run tests"));
+        var taskId = task.get("id").toString();
+
+        var run = post("/api/tasks/" + taskId + "/start?workflow=test-agent", null);
+        var runId = run.get("id").toString();
+
+        assertThat(run.get("status")).isEqualTo("WAITING_APPROVAL");
+        assertThat(jdbc.queryForObject("""
+                select status
+                  from workflow_node_execution
+                 where run_id = ?
+                   and node_id = 'validate'
+                """, String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
+
+        var approvals = getList("/api/approvals?status=PENDING");
+        var approvalId = approvals.getFirst().get("id").toString();
+        post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "test", "reason", "not needed"));
+
+        var failedRun = getMap("/api/runs/" + runId);
+        assertThat(failedRun.get("status")).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from workflow_node_execution
+                 where run_id = ?
+                   and node_id = 'validate'
+                """, Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                select status
+                  from workflow_node_execution
+                 where run_id = ?
+                   and node_id = 'validate'
+                """, String.class, java.util.UUID.fromString(runId))).isEqualTo("FAILURE");
     }
 
     @Test

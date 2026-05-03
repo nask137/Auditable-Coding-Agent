@@ -4,6 +4,7 @@ import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.Domain;
 import com.nask.agent.run.AgentRunService;
 import com.nask.agent.step.AgentStepService;
+import com.nask.agent.workflow.WorkflowService;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -21,7 +22,9 @@ class ApprovalServiceTests {
     private final AuditService auditService = mock(AuditService.class);
     private final AgentRunService runService = mock(AgentRunService.class);
     private final AgentStepService stepService = mock(AgentStepService.class);
-    private final ApprovalService service = new ApprovalService(repository, auditService, runService, stepService);
+    private final WorkflowService workflowService = mock(WorkflowService.class);
+    private final ApprovalService service = new ApprovalService(repository, auditService, runService, stepService,
+            workflowService);
 
     @Test
     void consumesMatchingApprovedRequest() {

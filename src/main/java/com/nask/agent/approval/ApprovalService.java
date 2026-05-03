@@ -6,6 +6,7 @@ import com.nask.agent.common.ApiException;
 import com.nask.agent.common.Domain;
 import com.nask.agent.run.AgentRunService;
 import com.nask.agent.step.AgentStepService;
+import com.nask.agent.workflow.WorkflowService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,16 +26,18 @@ public class ApprovalService {
     private final AuditService auditService;
     private final AgentRunService runService;
     private final AgentStepService stepService;
+    private final WorkflowService workflowService;
 
     /**
      * Creates an approval service.
      */
     public ApprovalService(ApprovalRepository repository, AuditService auditService, AgentRunService runService,
-                           AgentStepService stepService) {
+                           AgentStepService stepService, WorkflowService workflowService) {
         this.repository = repository;
         this.auditService = auditService;
         this.runService = runService;
         this.stepService = stepService;
+        this.workflowService = workflowService;
     }
 
     /**
@@ -139,8 +142,12 @@ public class ApprovalService {
                 null, Domain.RiskLevel.valueOf(approval.riskLevel()), Domain.ApprovalStatus.DENIED, true,
                 null, null, Map.of()));
         if (approval.stepId() != null) {
-            stepService.fail(approval.taskId(), approval.runId(), stepService.getRequired(approval.stepId()),
-                    "Approval denied: " + reason);
+            var step = stepService.getRequired(approval.stepId());
+            var outputSummary = "Approval denied: " + reason;
+            stepService.fail(approval.taskId(), approval.runId(), step, outputSummary);
+            workflowService.updateStepNode(approval.taskId(), approval.runId(), step.id(),
+                    Domain.WorkflowNodeStatus.FAILURE, step.inputSummary(), outputSummary,
+                    Map.of("approvalId", approval.id().toString()));
         }
         runService.fail(approval.runId(), approval.taskId(), "Approval denied: " + reason);
         return getRequired(id);
