@@ -288,6 +288,18 @@ createdAt
 第二次返回合法 JSON
 ```
 
+在单独 PowerShell 窗口启动仓库内置 Mock LLM：
+
+```powershell
+python tools\mock_llm_server.py --port 9000
+```
+
+如果要重复执行某个用例，可先重置 Mock LLM 的内存计数：
+
+```powershell
+Invoke-RestMethod http://localhost:9000/reset
+```
+
 启动 Agent Service 时使用：
 
 ```powershell
@@ -303,6 +315,8 @@ mvn spring-boot:run
 提交任务：
 
 ```powershell
+Invoke-RestMethod http://localhost:9000/reset
+
 $mockPath = "D:\tmp\agent-step2-cli-model-retry"
 Remove-Item -Recurse -Force $mockPath -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $mockPath | Out-Null
@@ -354,6 +368,8 @@ Mock 模型行为：
 提交任务：
 
 ```powershell
+Invoke-RestMethod http://localhost:9000/reset
+
 $rejectPath = "D:\tmp\agent-step2-cli-runtime-reject"
 Remove-Item -Recurse -Force $rejectPath -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $rejectPath | Out-Null
@@ -406,6 +422,8 @@ Mock 模型行为：
 提交任务：
 
 ```powershell
+Invoke-RestMethod http://localhost:9000/reset
+
 $inputPath = "D:\tmp\agent-step2-cli-user-input"
 Remove-Item -Recurse -Force $inputPath -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $inputPath | Out-Null
