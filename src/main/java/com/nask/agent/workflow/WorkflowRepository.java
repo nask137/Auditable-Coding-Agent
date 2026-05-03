@@ -10,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -106,6 +107,28 @@ public class WorkflowRepository {
                 .addValue("completedAt", ts(execution.completedAt()))
                 .addValue("metadataJson", json.toJson(execution.metadata())));
         return execution;
+    }
+
+    public void updateNodeExecutionForStep(UUID runId, UUID stepId, String status, String inputSummary,
+                                           String outputSummary, java.time.Instant completedAt,
+                                           Map<String, Object> metadata) {
+        jdbc.update("""
+                update workflow_node_execution
+                   set status = :status,
+                       input_summary = :inputSummary,
+                       output_summary = :outputSummary,
+                       completed_at = :completedAt,
+                       metadata_json = cast(:metadataJson as jsonb)
+                 where run_id = :runId
+                   and agent_step_id = :stepId
+                """, new MapSqlParameterSource()
+                .addValue("runId", runId)
+                .addValue("stepId", stepId)
+                .addValue("status", status)
+                .addValue("inputSummary", inputSummary)
+                .addValue("outputSummary", outputSummary)
+                .addValue("completedAt", ts(completedAt))
+                .addValue("metadataJson", json.toJson(metadata == null ? Map.of() : metadata)));
     }
 
     public WorkflowEdgeDecision insertEdgeDecision(WorkflowEdgeDecision decision) {

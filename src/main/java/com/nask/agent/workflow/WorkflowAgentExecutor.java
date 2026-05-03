@@ -164,6 +164,14 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
                     step, Domain.WorkflowNodeStatus.WAITING_APPROVAL, result.summary());
             return;
         }
+        if (result.blocked()) {
+            stepService.fail(task.id(), run.id(), step, result.summary());
+            recordSingle(workflow, task.id(), run.id(), "validate", Domain.WorkflowNodeType.VALIDATION,
+                    step, Domain.WorkflowNodeStatus.BLOCKED, result.summary());
+            reportService.generate(task, run.id(), "Test workflow validation blocked: " + result.summary());
+            runService.fail(run.id(), task.id(), result.summary());
+            return;
+        }
         var exitCode = integer(result.payload().get("exitCode"), 1);
         var commandId = result.payload().get("commandId") == null ? null
                 : UUID.fromString(result.payload().get("commandId").toString());
@@ -231,18 +239,23 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
         var taskId = run.taskId();
         var task = taskService.getRequired(taskId);
         var existingStepIds = workflowService.nodes(run.id()).stream()
+                .filter(node -> node.agentStepId() != null)
                 .map(WorkflowNodeExecution::agentStepId)
                 .collect(java.util.stream.Collectors.toSet());
         var steps = stepService.findByRun(run.id()).stream()
                 .sorted(Comparator.comparing(AgentStep::startedAt))
-                .filter(step -> !existingStepIds.contains(step.id()))
                 .toList();
         String previous = null;
         for (var step : steps) {
             var nodeId = nodeId(step.stepType());
-            workflowService.recordNode(taskId, run.id(), workflow, nodeId, nodeType(step.stepType()), step.id(),
-                    nodeStatus(step.status()), step.inputSummary(), step.outputSummary(), Map.of("stepType", step.stepType()));
-            if (previous != null) {
+            if (existingStepIds.contains(step.id())) {
+                workflowService.updateStepNode(taskId, run.id(), step.id(), nodeStatus(step.status()),
+                        step.inputSummary(), step.outputSummary(), Map.of("stepType", step.stepType()));
+            } else {
+                workflowService.recordNode(taskId, run.id(), workflow, nodeId, nodeType(step.stepType()), step.id(),
+                        nodeStatus(step.status()), step.inputSummary(), step.outputSummary(), Map.of("stepType", step.stepType()));
+            }
+            if (previous != null && !existingStepIds.contains(step.id())) {
                 workflowService.recordEdge(taskId, run.id(), workflow, previous, nodeId,
                         Domain.WorkflowEdgeType.ON_SUCCESS, "AgentStep order", "Backfilled from fixed loop", Map.of());
             }
