@@ -3,10 +3,12 @@ package com.nask.agent.task;
 import com.nask.agent.run.AgentLoopExecutor;
 import com.nask.agent.run.AgentRun;
 import com.nask.agent.run.AgentRunService;
+import com.nask.agent.workflow.WorkflowService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,14 +24,17 @@ public class TaskController {
     private final TaskService taskService;
     private final AgentRunService runService;
     private final AgentLoopExecutor loopExecutor;
+    private final WorkflowService workflowService;
 
     /**
      * Creates a task controller with task and run orchestration services.
      */
-    public TaskController(TaskService taskService, AgentRunService runService, AgentLoopExecutor loopExecutor) {
+    public TaskController(TaskService taskService, AgentRunService runService, AgentLoopExecutor loopExecutor,
+                          WorkflowService workflowService) {
         this.taskService = taskService;
         this.runService = runService;
         this.loopExecutor = loopExecutor;
+        this.workflowService = workflowService;
     }
 
     /**
@@ -52,9 +57,11 @@ public class TaskController {
      * Starts a synchronous Phase 1 agent run for the task.
      */
     @PostMapping("/{taskId}/start")
-    AgentRun start(@PathVariable UUID taskId) {
+    AgentRun start(@PathVariable UUID taskId,
+                   @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
         var task = taskService.getRequired(taskId);
-        var run = runService.createRun(task);
+        var workflowDefinition = workflowService.requireEnabledByName(workflow);
+        var run = runService.createRun(task, workflowDefinition.name());
         // Phase 1 runs inline so API clients can immediately observe the final
         // state or a WAITING_APPROVAL pause without a background worker.
         loopExecutor.execute(run.id());

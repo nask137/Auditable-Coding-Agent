@@ -8,6 +8,7 @@ import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.ReportContext;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.task.CodingTask;
+import com.nask.agent.workflow.WorkflowService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -24,18 +25,20 @@ public class ReportService {
     private final FileChangeRepository fileChangeRepository;
     private final AuditService auditService;
     private final RuntimeFailureService runtimeFailureService;
+    private final WorkflowService workflowService;
 
     /**
      * Creates a report service.
      */
     public ReportService(TaskReportRepository repository, LlmGateway llmGateway,
                          FileChangeRepository fileChangeRepository, AuditService auditService,
-                         RuntimeFailureService runtimeFailureService) {
+                         RuntimeFailureService runtimeFailureService, WorkflowService workflowService) {
         this.repository = repository;
         this.llmGateway = llmGateway;
         this.fileChangeRepository = fileChangeRepository;
         this.auditService = auditService;
         this.runtimeFailureService = runtimeFailureService;
+        this.workflowService = workflowService;
     }
 
     /**
@@ -46,6 +49,8 @@ public class ReportService {
         var changes = fileChangeRepository.findByTask(task.id());
         var events = auditService.eventsForTask(task.id());
         var failures = runtimeFailureService.findByTask(task.id());
+        var workflowNodes = workflowService.nodes(runId);
+        var workflowEdges = workflowService.edges(runId);
         // The LLM drafts the narrative, while deterministic sections append the
         // exact file-change and audit trails stored by the runtime.
         var content = draft.markdown()
@@ -55,6 +60,13 @@ public class ReportService {
                 + "\n## Failure and Recovery\n\n"
                 + failures.stream().map(failure -> "- `%s` strategy `%s`: %s"
                         .formatted(failure.failureType(), failure.strategy(), failure.summary()))
+                .reduce("", (a, b) -> a + b + "\n")
+                + "\n## Workflow\n\n"
+                + workflowNodes.stream().map(node -> "- Node `%s` `%s`: %s"
+                        .formatted(node.nodeId(), node.status(), node.outputSummary()))
+                .reduce("", (a, b) -> a + b + "\n")
+                + workflowEdges.stream().map(edge -> "- Edge `%s` -> `%s`: %s"
+                        .formatted(edge.fromNodeId(), edge.toNodeId(), edge.decisionReason()))
                 .reduce("", (a, b) -> a + b + "\n")
                 + "\n## Audit Events\n\n"
                 + events.stream().map(event -> "- %s `%s`".formatted(event.occurredAt(), event.eventType()))
