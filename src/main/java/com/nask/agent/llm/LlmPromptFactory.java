@@ -27,7 +27,10 @@ public class LlmPromptFactory {
 
                 User request:
                 %s
-                """.formatted(context.userRequest()));
+
+                Runtime recovery notes:
+                %s
+                """.formatted(context.userRequest(), context.recoveryNotes()));
     }
 
     public LlmPrompt planDraft(PlanningContext context) {
@@ -49,7 +52,10 @@ public class LlmPromptFactory {
 
                 Observed workspace files:
                 %s
-                """.formatted(context.understanding(), context.observedFiles()));
+
+                Runtime recovery notes:
+                %s
+                """.formatted(context.understanding(), context.observedFiles(), context.recoveryNotes()));
     }
 
     public LlmPrompt agentDecision(ExecutionContext context) {
@@ -138,7 +144,10 @@ public class LlmPromptFactory {
                 Task id: %s
                 Run id: %s
                 Workspace id: %s
-                """.formatted(context.taskId(), context.runId(), context.workspaceId()));
+
+                Runtime recovery notes:
+                %s
+                """.formatted(context.taskId(), context.runId(), context.workspaceId(), context.recoveryNotes()));
     }
 
     public LlmPrompt finalReport(ReportContext context) {

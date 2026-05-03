@@ -40,39 +40,43 @@ public class RecoveryPolicy {
         var attempt = repository.countByDecisionScope(runId, stepId, planItemId, failureType.name(), decisionScope) + 1;
         var remaining = settings.maxModelRetries() - attempt;
         if (remaining >= 0) {
-            return new RecoveryDecision(Domain.RecoveryStrategy.RETRY_SAME_ACTION, true, attempt, remaining);
+            return new RecoveryDecision(Domain.RecoveryStrategy.RETRY_SAME_ACTION, true, attempt, remaining, false);
         }
-        return askUser(runId);
+        return askUser(runId, true);
     }
 
     private RecoveryDecision replan(UUID runId) {
         var attempt = repository.countByRunAndStrategy(runId, Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name()) + 1;
         var remaining = settings.maxReplanAttempts() - attempt;
         if (remaining >= 0) {
-            return new RecoveryDecision(Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM, true, attempt, remaining);
+            return new RecoveryDecision(Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM, true, attempt, remaining, false);
         }
-        return askUser(runId);
+        return askUser(runId, true);
     }
 
     private RecoveryDecision replanRemaining(UUID runId) {
         var attempt = repository.countByRunAndStrategy(runId, Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN.name()) + 1;
         var remaining = settings.maxConsecutiveFailures() - attempt;
         if (remaining >= 0) {
-            return new RecoveryDecision(Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN, true, attempt, remaining);
+            return new RecoveryDecision(Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN, true, attempt, remaining, false);
         }
-        return askUser(runId);
+        return askUser(runId, true);
     }
 
     private RecoveryDecision askUser(UUID runId) {
+        return askUser(runId, false);
+    }
+
+    private RecoveryDecision askUser(UUID runId, boolean budgetExhausted) {
         var attempt = userInputRequestRepository.countPendingByRun(runId) + 1;
         var remaining = settings.maxUserInputRequestsPerRun() - attempt;
         if (remaining < 0) {
             return fail(Domain.RuntimeFailureType.USER_INPUT_REQUIRED);
         }
-        return new RecoveryDecision(Domain.RecoveryStrategy.ASK_USER, true, attempt, remaining);
+        return new RecoveryDecision(Domain.RecoveryStrategy.ASK_USER, true, attempt, remaining, budgetExhausted);
     }
 
     private RecoveryDecision fail(Domain.RuntimeFailureType failureType) {
-        return new RecoveryDecision(Domain.RecoveryStrategy.FAIL_TASK, false, 1, 0);
+        return new RecoveryDecision(Domain.RecoveryStrategy.FAIL_TASK, false, 1, 0, true);
     }
 }

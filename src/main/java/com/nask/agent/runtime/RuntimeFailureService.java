@@ -38,7 +38,8 @@ public class RuntimeFailureService {
                 "recoverable", decision.recoverable(),
                 "strategy", decision.strategy().name(),
                 "attempt", decision.attempt(),
-                "budgetRemaining", decision.budgetRemaining())));
+                "budgetRemaining", decision.budgetRemaining(),
+                "budgetExhausted", decision.budgetExhausted())));
         var failure = new RuntimeFailure(UUID.randomUUID(), taskId, runId, stepId, planItemId, type.name(),
                 decision.recoverable(), decision.strategy().name(), summary, details, eventId,
                 null, null, null, decision.attempt(), Instant.now());
@@ -48,7 +49,31 @@ public class RuntimeFailureService {
                 List.of(), null, null, null, null, null, Domain.RiskLevel.MEDIUM, null,
                 decision.recoverable(), null, null, Map.of("failureId", failure.id().toString(),
                 "budgetRemaining", decision.budgetRemaining())));
+        appendStrategyEvent(taskId, runId, stepId, type, failure, decision);
         return failure;
+    }
+
+    private void appendStrategyEvent(UUID taskId, UUID runId, UUID stepId, Domain.RuntimeFailureType type,
+                                     RuntimeFailure failure, RecoveryDecision decision) {
+        if (Domain.RecoveryStrategy.RETRY_SAME_ACTION.equals(decision.strategy())) {
+            auditService.append(new AuditEventDraft(taskId, runId, stepId, null,
+                    Domain.AuditEventType.RecoveryRetried, Domain.AuditActor.RUNTIME, Domain.AuditLevel.INFO,
+                    type.name(), "Retry same action", List.of(), null, null, null, null, null,
+                    Domain.RiskLevel.MEDIUM, null, true, null, null, Map.of(
+                    "failureId", failure.id().toString(),
+                    "attempt", decision.attempt(),
+                    "budgetRemaining", decision.budgetRemaining())));
+        }
+        if (decision.budgetExhausted()) {
+            auditService.append(new AuditEventDraft(taskId, runId, stepId, null,
+                    Domain.AuditEventType.RecoveryExhausted, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
+                    type.name(), decision.strategy().name(), List.of(), null, null, null, null, null,
+                    Domain.RiskLevel.MEDIUM, null, decision.recoverable(), null, null, Map.of(
+                    "failureId", failure.id().toString(),
+                    "strategy", decision.strategy().name(),
+                    "attempt", decision.attempt(),
+                    "budgetRemaining", decision.budgetRemaining())));
+        }
     }
 
     public List<RuntimeFailure> findByTask(UUID taskId) {
