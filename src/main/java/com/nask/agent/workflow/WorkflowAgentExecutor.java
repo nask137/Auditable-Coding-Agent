@@ -198,7 +198,7 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
                 command.stepId(), command.actionId(), workspace), command);
         if (result.blocked() || result.waitingApproval()) {
             stepService.fail(taskId, runId, step, result.summary());
-            recordSingle(workflow, taskId, runId, "validate", Domain.WorkflowNodeType.VALIDATION, step,
+            recordOrUpdateSingle(workflow, taskId, runId, "validate", Domain.WorkflowNodeType.VALIDATION, step,
                     Domain.WorkflowNodeStatus.FAILURE, result.summary());
             runService.fail(runId, taskId, result.summary());
             return;
@@ -210,7 +210,7 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
                 exitCode == 0, result.summary());
         stepService.complete(taskId, runId, step, result.summary());
         var status = exitCode == 0 ? Domain.WorkflowNodeStatus.SUCCESS : Domain.WorkflowNodeStatus.FAILURE;
-        recordSingle(workflow, taskId, runId, "validate", Domain.WorkflowNodeType.VALIDATION, step, status,
+        recordOrUpdateSingle(workflow, taskId, runId, "validate", Domain.WorkflowNodeType.VALIDATION, step, status,
                 result.summary());
         var task = taskService.getRequired(taskId);
         if (exitCode != 0) {
@@ -285,6 +285,16 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
                               String summary) {
         workflowService.recordNode(taskId, runId, workflow, nodeId, nodeType, step.id(), status,
                 step.inputSummary(), summary, Map.of());
+    }
+
+    private void recordOrUpdateSingle(WorkflowDefinition workflow, UUID taskId, UUID runId, String nodeId,
+                                      Domain.WorkflowNodeType nodeType, AgentStep step,
+                                      Domain.WorkflowNodeStatus status, String summary) {
+        var updated = workflowService.updateStepNode(taskId, runId, step.id(), status, step.inputSummary(),
+                summary, Map.of());
+        if (!updated) {
+            recordSingle(workflow, taskId, runId, nodeId, nodeType, step, status, summary);
+        }
     }
 
     private String nodeId(String stepType) {

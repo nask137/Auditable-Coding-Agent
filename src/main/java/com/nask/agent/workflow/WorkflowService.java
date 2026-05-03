@@ -72,12 +72,15 @@ public class WorkflowService {
         return node;
     }
 
-    public void updateStepNode(UUID taskId, UUID runId, UUID stepId, Domain.WorkflowNodeStatus status,
-                               String inputSummary, String outputSummary, Map<String, Object> metadata) {
-        repository.updateNodeExecutionForStep(runId, stepId, status.name(), inputSummary, outputSummary,
+    public boolean updateStepNode(UUID taskId, UUID runId, UUID stepId, Domain.WorkflowNodeStatus status,
+                                  String inputSummary, String outputSummary, Map<String, Object> metadata) {
+        var updated = repository.updateNodeExecutionForStep(runId, stepId, status.name(), inputSummary, outputSummary,
                 completedAt(status, Instant.now()), metadata == null ? Map.of() : metadata);
-        auditService.append(AuditEventDraft.info(taskId, runId, stepId, Domain.AuditEventType.WorkflowNodeCompleted,
-                Domain.AuditActor.RUNTIME, "Workflow node updated", status.name() + ": " + outputSummary));
+        if (updated > 0) {
+            auditService.append(AuditEventDraft.info(taskId, runId, stepId, Domain.AuditEventType.WorkflowNodeCompleted,
+                    Domain.AuditActor.RUNTIME, "Workflow node updated", status.name() + ": " + outputSummary));
+        }
+        return updated > 0;
     }
 
     public WorkflowEdgeDecision recordEdge(UUID taskId, UUID runId, WorkflowDefinition workflow, String fromNode,
