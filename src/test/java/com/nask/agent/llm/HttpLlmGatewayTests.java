@@ -69,7 +69,7 @@ class HttpLlmGatewayTests {
         var gateway = new HttpLlmGateway(new LlmPromptFactory(), client, new ObjectMapper(), validator, auditService);
 
         assertThatThrownBy(() -> gateway.understandTask(new TaskContext(UUID.randomUUID(), UUID.randomUUID(),
-                UUID.randomUUID(), UUID.randomUUID(), "create note")))
+                UUID.randomUUID(), UUID.randomUUID(), "create note", List.of())))
                 .isInstanceOf(LlmGatewayException.class)
                 .hasMessageContaining("Model call failed")
                 .extracting(error -> ((LlmGatewayException) error).failureType())
@@ -88,7 +88,7 @@ class HttpLlmGatewayTests {
         var runId = UUID.randomUUID();
         var stepId = UUID.randomUUID();
 
-        gateway.understandTask(new TaskContext(taskId, runId, stepId, UUID.randomUUID(), "create note"));
+        gateway.understandTask(new TaskContext(taskId, runId, stepId, UUID.randomUUID(), "create note", List.of()));
 
         var captor = forClass(AuditEventDraft.class);
         verify(auditService, times(2)).append(captor.capture());

@@ -63,6 +63,18 @@ public class UserInputRequestRepository {
                 .addValue("status", Domain.UserInputStatus.PENDING.name()), mapper()).stream().findFirst();
     }
 
+    public List<UserInputRequestRecord> findAnsweredByRun(UUID runId, int limit) {
+        return jdbc.query("""
+                select * from user_input_request
+                 where run_id = :runId and status = :status
+                 order by answered_at desc nulls last, created_at desc
+                 limit :limit
+                """, new MapSqlParameterSource()
+                .addValue("runId", runId)
+                .addValue("status", Domain.UserInputStatus.ANSWERED.name())
+                .addValue("limit", limit), mapper());
+    }
+
     public int countByRun(UUID runId) {
         return jdbc.queryForObject("select count(*) from user_input_request where run_id = :runId",
                 new MapSqlParameterSource("runId", runId), Integer.class);

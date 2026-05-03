@@ -34,6 +34,7 @@ class RecoveryPolicyTests {
         assertThat(decision.strategy()).isEqualTo(Domain.RecoveryStrategy.RETRY_SAME_ACTION);
         assertThat(decision.recoverable()).isTrue();
         assertThat(decision.budgetRemaining()).isEqualTo(1);
+        assertThat(decision.budgetExhausted()).isFalse();
     }
 
     @Test
@@ -50,6 +51,7 @@ class RecoveryPolicyTests {
 
         assertThat(decision.strategy()).isEqualTo(Domain.RecoveryStrategy.ASK_USER);
         assertThat(decision.recoverable()).isTrue();
+        assertThat(decision.budgetExhausted()).isTrue();
     }
 
     @Test
@@ -63,6 +65,7 @@ class RecoveryPolicyTests {
         assertThat(decision.strategy()).isEqualTo(Domain.RecoveryStrategy.FAIL_TASK);
         assertThat(decision.recoverable()).isFalse();
         assertThat(decision.budgetRemaining()).isZero();
+        assertThat(decision.budgetExhausted()).isTrue();
     }
 
     @Test

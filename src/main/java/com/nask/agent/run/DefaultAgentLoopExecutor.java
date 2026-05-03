@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -145,7 +146,7 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             var understandStep = stepService.start(task.id(), run.id(), null, Domain.StepType.UNDERSTAND_TASK, "Understand task");
             var understanding = callModelWithRecovery(task.id(), run.id(), understandStep.id(), null,
                     "understand task", () -> llmGateway.understandTask(new TaskContext(task.id(), run.id(), understandStep.id(),
-                            workspace.id(), task.userRequest())));
+                            workspace.id(), task.userRequest(), recoveryNotes(run.id()))));
             if (understanding == null) {
                 stepService.markWaitingUserInput(task.id(), run.id(), understandStep, "Waiting for user input");
                 return;
@@ -182,7 +183,8 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             log.info("Run {} observed {} workspace files for planning", run.id(), observedFiles.size());
             var planStep = stepService.start(task.id(), run.id(), null, Domain.StepType.CREATE_PLAN, "Create plan");
             var planDraft = callModelWithRecovery(task.id(), run.id(), planStep.id(), null, "create plan",
-                    () -> llmGateway.createPlan(new PlanningContext(task.id(), run.id(), understanding, observedFiles)));
+                    () -> llmGateway.createPlan(new PlanningContext(task.id(), run.id(), understanding, observedFiles,
+                            recoveryNotes(run.id()))));
             if (planDraft == null) {
                 stepService.markWaitingUserInput(task.id(), run.id(), planStep, "Waiting for user input");
                 return;
@@ -351,10 +353,12 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
     }
 
     private List<String> recoveryNotes(UUID runId) {
-        return runtimeFailureService.findByRun(runId).stream()
+        var notes = new ArrayList<>(runtimeFailureService.findByRun(runId).stream()
                 .map(failure -> failure.failureType() + ": " + failure.summary())
                 .limit(5)
-                .toList();
+                .toList());
+        notes.addAll(userInputRequestService.answeredRecoveryNotes(runId, 5));
+        return notes.stream().limit(10).toList();
     }
 
     /**
@@ -363,7 +367,8 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
     private ToolExecutionResult validateIfNeeded(UUID taskId, UUID runId, com.nask.agent.workspace.Workspace workspace,
                                                  PlanView plan) {
         var validation = callModelWithRecovery(taskId, runId, null, null, "suggest validation",
-                () -> llmGateway.suggestValidation(new ValidationContext(taskId, runId, workspace.id())));
+                () -> llmGateway.suggestValidation(new ValidationContext(taskId, runId, workspace.id(),
+                        recoveryNotes(runId))));
         if (validation == null) {
             return ToolExecutionResult.waiting(null, "Waiting for user input");
         }

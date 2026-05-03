@@ -93,6 +93,13 @@ public class UserInputRequestService {
         return repository.findPendingByRun(runId).orElse(null);
     }
 
+    public List<String> answeredRecoveryNotes(UUID runId, int limit) {
+        return repository.findAnsweredByRun(runId, limit).stream()
+                .map(request -> "User answered recovery prompt `%s`: %s"
+                        .formatted(request.question(), request.answer()))
+                .toList();
+    }
+
     private void requirePending(UserInputRequestRecord request) {
         if (!Domain.UserInputStatus.PENDING.name().equals(request.status())) {
             throw new ApiException(HttpStatus.CONFLICT, "USER_INPUT_NOT_PENDING",
