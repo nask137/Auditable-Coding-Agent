@@ -245,6 +245,12 @@ class Phase1ApiIntegrationTests {
         assertThat(jdbc.queryForObject(
                 "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("""
+                select status
+                  from workflow_node_execution
+                 where run_id = ?
+                   and node_id = 'validate'
+                """, String.class, java.util.UUID.fromString(runId))).isEqualTo("SUCCESS");
         assertThat(jdbc.queryForObject("select approval_id is not null from command_execution where run_id = ?", Boolean.class, java.util.UUID.fromString(runId)))
                 .isTrue();
 
@@ -423,6 +429,45 @@ class Phase1ApiIntegrationTests {
         assertThat(getList("/api/runs/" + runId + "/workflow/nodes"))
                 .extracting(node -> node.get("nodeId"))
                 .contains("validate", "report", "finish");
+    }
+
+    @Test
+    void blockedTestWorkflowValidationDoesNotRecordExecutionResult() throws Exception {
+        Files.writeString(workspaceDir.resolve("README.md"), "test workflow blocked workspace");
+
+        var workspace = post("/api/workspaces", Map.of(
+                "name", "test-workflow-blocked",
+                "rootPath", workspaceDir.toString(),
+                "trusted", true));
+        var workspaceId = workspace.get("id").toString();
+
+        post("/api/workspaces/" + workspaceId + "/command-policies", Map.of(
+                "policyType", "BLOCKED",
+                "executable", "java",
+                "argsPattern", List.of("-version")));
+
+        var task = post("/api/tasks", Map.of(
+                "workspaceId", workspaceId,
+                "title", "test workflow blocked task",
+                "userRequest", "run tests"));
+        var taskId = task.get("id").toString();
+
+        var run = post("/api/tasks/" + taskId + "/start?workflow=test-agent", null);
+        var runId = run.get("id").toString();
+
+        assertThat(run.get("status")).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("select count(*) from validation_result where run_id = ?",
+                Integer.class, java.util.UUID.fromString(runId))).isZero();
+        assertThat(jdbc.queryForObject("select status from command_execution where run_id = ?",
+                String.class, java.util.UUID.fromString(runId))).isEqualTo("BLOCKED");
+        assertThat(jdbc.queryForObject("select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                String.class, java.util.UUID.fromString(runId))).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("""
+                select status
+                  from workflow_node_execution
+                 where run_id = ?
+                   and node_id = 'validate'
+                """, String.class, java.util.UUID.fromString(runId))).isEqualTo("BLOCKED");
     }
 
     private Map<String, Object> post(String path, Object body) {

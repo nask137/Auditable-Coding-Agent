@@ -65,11 +65,19 @@ public class WorkflowService {
         var now = Instant.now();
         var node = repository.insertNodeExecution(new WorkflowNodeExecution(UUID.randomUUID(), taskId, runId,
                 workflow.id(), nodeId, nodeType.name(), stepId, status.name(), inputSummary, outputSummary,
-                null, now, status == Domain.WorkflowNodeStatus.RUNNING ? null : now,
+                null, now, completedAt(status, now),
                 metadata == null ? Map.of() : metadata));
         auditService.append(AuditEventDraft.info(taskId, runId, stepId, Domain.AuditEventType.WorkflowNodeCompleted,
                 Domain.AuditActor.RUNTIME, "Workflow node " + nodeId, status.name() + ": " + outputSummary));
         return node;
+    }
+
+    public void updateStepNode(UUID taskId, UUID runId, UUID stepId, Domain.WorkflowNodeStatus status,
+                               String inputSummary, String outputSummary, Map<String, Object> metadata) {
+        repository.updateNodeExecutionForStep(runId, stepId, status.name(), inputSummary, outputSummary,
+                completedAt(status, Instant.now()), metadata == null ? Map.of() : metadata);
+        auditService.append(AuditEventDraft.info(taskId, runId, stepId, Domain.AuditEventType.WorkflowNodeCompleted,
+                Domain.AuditActor.RUNTIME, "Workflow node updated", status.name() + ": " + outputSummary));
     }
 
     public WorkflowEdgeDecision recordEdge(UUID taskId, UUID runId, WorkflowDefinition workflow, String fromNode,
@@ -89,6 +97,13 @@ public class WorkflowService {
 
     public List<WorkflowEdgeDecision> edges(UUID runId) {
         return repository.findEdgeDecisionsByRun(runId);
+    }
+
+    private Instant completedAt(Domain.WorkflowNodeStatus status, Instant now) {
+        return switch (status) {
+            case SUCCESS, FAILURE, BLOCKED, FINISHED -> now;
+            case RUNNING, WAITING_APPROVAL, WAITING_USER_INPUT -> null;
+        };
     }
 
     private void upsertBuiltIn(String name, Domain.WorkflowMode mode, String description) {
