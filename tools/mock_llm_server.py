@@ -75,15 +75,15 @@ def scenario(user_prompt: str) -> str:
     lowered = user_prompt.lower()
     if "exercise model output retry recovery" in lowered or "model output retry" in lowered:
         return "model_retry"
+    if "force runtime to ask for user input" in lowered or "user input" in lowered:
+        return "user_input"
     if (
         "exercise runtime rejected tool recovery" in lowered
         or "runtime rejected tool" in lowered
         or "unsupported tool intent" in lowered
-        or "runtime recovery" in lowered
+        or "replan after runtime rejection" in lowered
     ):
         return "runtime_reject"
-    if "force runtime to ask for user input" in lowered or "user input" in lowered:
-        return "user_input"
     return "default"
 
 
