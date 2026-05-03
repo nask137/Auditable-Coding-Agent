@@ -32,6 +32,10 @@ import java.util.concurrent.Callable;
                 AgentCli.InputCommand.class,
                 AgentCli.AnswerCommand.class,
                 AgentCli.CancelInputCommand.class,
+                AgentCli.WorkflowsCommand.class,
+                AgentCli.WorkflowCommand.class,
+                AgentCli.WorkflowStatusCommand.class,
+                AgentCli.WorkflowPathCommand.class,
                 AgentCli.CommandPolicyCommand.class
         })
 public class AgentCli implements Callable<Integer> {
@@ -149,6 +153,7 @@ public class AgentCli implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String task;
         @CommandLine.Option(names = "--workspace", required = true) String workspaceId;
+        @CommandLine.Option(names = "--workflow", defaultValue = "coding-agent") String workflow;
 
         /**
          * Creates the task, then starts it through the HTTP API.
@@ -158,7 +163,71 @@ public class AgentCli implements Callable<Integer> {
             var root = (AgentCli) spec.root().userObject();
             var created = root.post("/api/tasks", Map.of("workspaceId", workspaceId, "title", "CLI task", "userRequest", task));
             var id = root.mapper.readTree(created).get("id").asText();
-            System.out.println(root.post("/api/tasks/" + id + "/start", null));
+            System.out.println(root.post("/api/tasks/" + id + "/start?workflow=" + workflow, null));
+            return 0;
+        }
+    }
+
+    /**
+     * Lists workflow definitions.
+     */
+    @CommandLine.Command(name = "workflows")
+    static class WorkflowsCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workflows"));
+            return 0;
+        }
+    }
+
+    /**
+     * Displays one workflow definition.
+     */
+    @CommandLine.Command(name = "workflow")
+    static class WorkflowCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workflowId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workflows/" + workflowId));
+            return 0;
+        }
+    }
+
+    /**
+     * Displays the workflow definition selected by a run.
+     */
+    @CommandLine.Command(name = "workflow-status")
+    static class WorkflowStatusCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String runId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/runs/" + runId + "/workflow"));
+            return 0;
+        }
+    }
+
+    /**
+     * Displays workflow node and edge history for a run.
+     */
+    @CommandLine.Command(name = "workflow-path")
+    static class WorkflowPathCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String runId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/runs/" + runId + "/workflow/nodes"));
+            System.out.println(root.get("/api/runs/" + runId + "/workflow/edges"));
             return 0;
         }
     }

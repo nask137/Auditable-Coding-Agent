@@ -37,12 +37,26 @@ public class AgentRunService {
      */
     @Transactional
     public AgentRun createRun(CodingTask task) {
-        var run = new AgentRun(UUID.randomUUID(), task.id(), "CODE_EDIT", Domain.AgentRunStatus.RUNNING.name(),
-                Instant.now(), null, null, Map.of("loop", "phase1-fixed"));
+        return createRun(task, "coding-agent");
+    }
+
+    /**
+     * Creates a run bound to a workflow name and marks the task running.
+     */
+    @Transactional
+    public AgentRun createRun(CodingTask task, String workflowName) {
+        var workflow = workflowName == null || workflowName.isBlank() ? "coding-agent" : workflowName;
+        var mode = switch (workflow) {
+            case "review-agent" -> "REVIEW";
+            case "test-agent" -> "TEST";
+            default -> "CODE_EDIT";
+        };
+        var run = new AgentRun(UUID.randomUUID(), task.id(), mode, Domain.AgentRunStatus.RUNNING.name(),
+                Instant.now(), null, null, Map.of("loop", "phase3-workflow", "workflow", workflow));
         repository.insert(run);
         taskService.updateStatus(task.id(), Domain.TaskStatus.RUNNING);
         auditService.append(AuditEventDraft.info(task.id(), run.id(), null, Domain.AuditEventType.AgentRunStarted,
-                Domain.AuditActor.RUNTIME, "Start agent run", "Agent mode CODE_EDIT"));
+                Domain.AuditActor.RUNTIME, "Start agent run", "Agent mode " + mode + " workflow " + workflow));
         return run;
     }
 

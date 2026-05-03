@@ -142,6 +142,8 @@ public final class Domain {
         UserInputRequested,
         UserInputProvided,
         UserInputCancelled,
+        WorkflowNodeCompleted,
+        WorkflowEdgeSelected,
         AgentFinished,
         AgentFailed
     }
@@ -271,5 +273,53 @@ public final class Domain {
      */
     public enum ValidationType {
         TEST, BUILD, LINT, TYPE_CHECK, CUSTOM
+    }
+
+    /**
+     * Built-in workflow modes supported by the phase 3 workflow runtime.
+     */
+    public enum WorkflowMode {
+        CODING, REVIEW, TEST, PLANNING, DEBUG
+    }
+
+    /**
+     * Node types understood by the phase 3 workflow runtime.
+     */
+    public enum WorkflowNodeType {
+        TASK_UNDERSTANDING,
+        WORKSPACE_INSPECTION,
+        PLAN_CREATION,
+        PLAN_ITEM_EXECUTION,
+        VALIDATION,
+        REPORT,
+        WAIT_APPROVAL,
+        WAIT_USER_INPUT,
+        CONDITION,
+        FINISH,
+        FAIL
+    }
+
+    /**
+     * Edge types used when selecting the next workflow node.
+     */
+    public enum WorkflowEdgeType {
+        ALWAYS,
+        ON_SUCCESS,
+        ON_FAILURE,
+        ON_BLOCKED,
+        ON_WAITING_APPROVAL,
+        ON_WAITING_USER_INPUT,
+        ON_APPROVAL_GRANTED,
+        ON_APPROVAL_DENIED,
+        ON_VALIDATION_FAILED,
+        ON_MAX_RETRY,
+        CONDITION
+    }
+
+    /**
+     * Lifecycle of one workflow node execution.
+     */
+    public enum WorkflowNodeStatus {
+        RUNNING, SUCCESS, FAILURE, BLOCKED, WAITING_APPROVAL, WAITING_USER_INPUT, FINISHED
     }
 }

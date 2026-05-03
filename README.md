@@ -2,7 +2,7 @@
 
 Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服务。项目目标不是做一个只会聊天的 Agent，而是把编码任务拆成可追踪的步骤：理解任务、检查 workspace、生成计划、调用受控工具、记录文件变更、执行验证命令、处理审批，并生成任务报告。
 
-当前代码已从“阶段 1：单 Agent 执行闭环”推进到“阶段 2：可审计运行时”的基础版本。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、固定 Agent Loop、基础文件工具、命令审批、审计事件、结构化失败记录、恢复策略、用户介入请求、任务报告和轻量 CLI。LLM 侧默认使用 `StubLlmGateway` 验证 Runtime 闭环，也可以通过 HTTP 网关接入 DeepSeek/OpenAI-compatible 模型，让模型只输出结构化任务理解、计划和工具动作意图。
+当前代码已推进到“阶段 3：状态机与工作流内核”的基础版本。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、基础文件工具、命令审批、审计事件、结构化失败记录、恢复策略、用户介入请求、任务报告、轻量 CLI，以及可查询的 WorkflowDefinition、WorkflowNodeExecution 和 WorkflowEdgeDecision。LLM 侧默认使用 `StubLlmGateway` 验证 Runtime 闭环，也可以通过 HTTP 网关接入 DeepSeek/OpenAI-compatible 模型，让模型只输出结构化任务理解、计划和工具动作意图。
 
 ## 当前能力
 
@@ -16,6 +16,8 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 - 记录 AuditEvent、ToolCall、ToolResult、FileChange、CommandExecution、ApprovalRequest、ValidationResult 和 TaskReport。
 - 记录 RuntimeFailure，并在模型输出、工具动作或验证被 Runtime 拒绝时选择重试、重新规划、请求用户介入或失败。
 - 创建 UserInputRequest，让任务进入 `WAITING_USER_INPUT` 并在用户回答后恢复运行。
+- 通过阶段 3 工作流入口运行 `coding-agent`、`review-agent` 和 `test-agent`。
+- 记录工作流节点执行和边选择，任务报告包含 Workflow section。
 - 通过 REST API 和 picocli CLI 查看任务状态、事件、变更、失败、审批、用户输入请求和报告。
 
 ## 技术栈
@@ -56,6 +58,7 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 │   ├── task/                      # CodingTask
 │   ├── tool/                      # ToolCall / ToolResult
 │   ├── validation/                # 验证结果
+│   ├── workflow/                  # 阶段 3 工作流定义和执行记录
 │   └── workspace/                 # Workspace 和路径边界保护
 ├── src/main/resources/
 │   ├── application.properties     # 默认配置
@@ -200,11 +203,12 @@ $workspaceId = $workspace.id
 agent command allow --workspace $workspaceId --exec java --args "-version"
 ```
 
-提交并启动任务：
+提交并启动任务，默认使用 `coding-agent` 工作流：
 
 ```powershell
 $runJson = agent run "create an audited note and validate" --workspace $workspaceId
 $run = $runJson | ConvertFrom-Json
+$runId = $run.id
 $taskId = $run.taskId
 ```
 
@@ -214,11 +218,39 @@ $taskId = $run.taskId
 agent status $taskId
 agent events $taskId
 agent failures $taskId
+agent workflow-status $runId
+agent workflow-path $runId
 agent diff $taskId
 agent report $taskId
 ```
 
 在当前 Stub 行为下，Agent 会在 workspace 中创建 `AGENT_TASK_NOTE.md`，记录一次 FileChange，执行或申请执行 `java -version`，并生成 Markdown 格式的 TaskReport。
+
+### 工作流模式
+
+内置工作流：
+
+```text
+coding-agent：默认编码工作流，复用当前安全闭环并记录 workflow 节点和边。
+review-agent：只读检查 workspace 并生成报告，不创建 FileChange。
+test-agent：执行验证命令并记录 ValidationResult。
+```
+
+通过 CLI 指定工作流：
+
+```powershell
+agent run "review this project" --workspace $workspaceId --workflow review-agent
+agent run "run tests" --workspace $workspaceId --workflow test-agent
+```
+
+查看工作流：
+
+```powershell
+agent workflows
+agent workflow <workflowId>
+agent workflow-status <runId>
+agent workflow-path <runId>
+```
 
 ### 审批流程
 
@@ -290,6 +322,12 @@ GET  /api/tasks/{taskId}/changes
 GET  /api/tasks/{taskId}/failures
 GET  /api/tasks/{taskId}/report
 
+GET  /api/workflows
+GET  /api/workflows/{workflowId}
+GET  /api/runs/{runId}/workflow
+GET  /api/runs/{runId}/workflow/nodes
+GET  /api/runs/{runId}/workflow/edges
+
 GET  /api/approvals
 GET  /api/approvals/{approvalId}
 POST /api/approvals/{approvalId}/approve
@@ -352,11 +390,15 @@ mvn test
 - `docs/step1/phase1-work-plan.md`：阶段 1 工作计划。
 - `docs/step1/phase1-cli-test-guide.md`：CLI 手工测试指南。
 - `docs/step2/phase2-work-plan.md`：阶段 2 工作计划和实现范围。
+- `docs/step3/phase3-work-plan.md`：阶段 3 工作计划和实现范围。
+- `docs/step3/default-workflows.md`：内置工作流说明。
+- `docs/step3/phase3-cli-test-guide.md`：阶段 3 CLI 手工测试指南。
 
 ## 当前限制
 
 - 默认 LLM 实现是 `StubLlmGateway`，固定生成三步计划；配置 `AGENT_LLM_PROVIDER=http` 后可使用真实模型，但模型输出仍受结构化解析、Bean Validation 和动作白名单约束。
-- Agent Loop 仍是同步执行；后台任务队列、WebSocket/SSE 推送和多实例协调尚未实现。
+- Workflow Runtime 仍是同步执行；后台任务队列、WebSocket/SSE 推送和多实例协调尚未实现。
+- `coding-agent` 当前通过阶段 3 默认入口包装并审计已有固定 Loop；后续可继续把固定 Loop 内部完全拆成独立节点执行器。
 - CLI 输出原始 JSON，尚未做表格化、分页、高亮或交互式审批。
 - 目前没有 Web 控制台、IDE 插件、多 Agent、长期记忆、RAG 或工作流 DSL。
 - 文件修改能力已有审计和审批基础，但 Stub Loop 目前只演示创建 `AGENT_TASK_NOTE.md`，不会自动修改业务源码。
@@ -374,4 +416,4 @@ mvn test
 阶段 6：多 Agent、插件化与产品化
 ```
 
-短期最重要的下一步是继续强化阶段 2 的真实模型恢复场景测试，并把固定 Loop 抽象为阶段 3 的状态机与工作流内核。
+短期最重要的下一步是继续把 `coding-agent` 内部从固定 Loop 迁移为完全节点化执行，并为阶段 4 的项目记忆和代码理解增加可组合节点。
