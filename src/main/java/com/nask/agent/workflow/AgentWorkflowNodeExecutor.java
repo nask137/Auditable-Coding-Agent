@@ -9,6 +9,7 @@ import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.file.FileToolService;
 import com.nask.agent.git.GitToolService;
 import com.nask.agent.llm.ExecutionContext;
+import com.nask.agent.llm.LlmGatewayException;
 import com.nask.agent.llm.PlanningContext;
 import com.nask.agent.llm.TaskContext;
 import com.nask.agent.llm.TaskUnderstanding;
@@ -18,7 +19,9 @@ import com.nask.agent.plan.PlanService;
 import com.nask.agent.report.ReportService;
 import com.nask.agent.run.AgentRunService;
 import com.nask.agent.runtime.FailureClassifier;
+import com.nask.agent.runtime.RuntimeFailure;
 import com.nask.agent.runtime.RuntimeFailureService;
+import com.nask.agent.runtime.UserInputRequestService;
 import com.nask.agent.step.AgentStepService;
 import com.nask.agent.tool.ToolExecutionContext;
 import com.nask.agent.tool.ToolExecutionResult;
@@ -51,6 +54,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     private final RuntimeFailureService runtimeFailureService;
     private final FailureClassifier failureClassifier;
     private final AgentRunService runService;
+    private final UserInputRequestService userInputRequestService;
 
     public AgentWorkflowNodeExecutor(AgentStepService stepService, AgentActionService actionService,
                                      PlanService planService, com.nask.agent.llm.LlmGateway llmGateway,
@@ -61,7 +65,8 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                                      CommandExecutionRepository commandExecutionRepository,
                                      ToolRecordRepository toolRecordRepository,
                                      RuntimeFailureService runtimeFailureService,
-                                     FailureClassifier failureClassifier, AgentRunService runService) {
+                                     FailureClassifier failureClassifier, AgentRunService runService,
+                                     UserInputRequestService userInputRequestService) {
         this.stepService = stepService;
         this.actionService = actionService;
         this.planService = planService;
@@ -78,6 +83,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         this.runtimeFailureService = runtimeFailureService;
         this.failureClassifier = failureClassifier;
         this.runService = runService;
+        this.userInputRequestService = userInputRequestService;
     }
 
     @Override
@@ -108,8 +114,13 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         }
         var step = stepService.start(state.task().id(), state.run().id(), null,
                 Domain.StepType.UNDERSTAND_TASK, "Understand task");
-        var understanding = llmGateway.understandTask(new TaskContext(state.task().id(), state.run().id(), step.id(),
-                state.workspace().id(), state.task().userRequest(), state.recoveryNotes()));
+        var understanding = callModelWithRecovery(state, step.id(), null, "understand task",
+                () -> llmGateway.understandTask(new TaskContext(state.task().id(), state.run().id(), step.id(),
+                        state.workspace().id(), state.task().userRequest(), state.recoveryNotes())));
+        if (understanding == null) {
+            stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, "Waiting for user input");
+            return NodeExecutionResult.waitingUserInput("Waiting for user input", Map.of("stepId", step.id().toString()));
+        }
         stepService.complete(state.task().id(), state.run().id(), step, understanding.summary());
         return NodeExecutionResult.success(understanding.summary(), Map.of(
                 "stepId", step.id().toString(),
@@ -155,8 +166,13 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 string(state.transientValue("taskType"), "CODE_EDIT"),
                 list(state.transientValue("constraints")),
                 list(state.transientValue("searchHints")));
-        var planDraft = llmGateway.createPlan(new PlanningContext(state.task().id(), state.run().id(), understanding,
-                list(state.transientValue("observedFiles")), state.recoveryNotes()));
+        var planDraft = callModelWithRecovery(state, step.id(), null, "create plan",
+                () -> llmGateway.createPlan(new PlanningContext(state.task().id(), state.run().id(), understanding,
+                        list(state.transientValue("observedFiles")), state.recoveryNotes())));
+        if (planDraft == null) {
+            stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, "Waiting for user input");
+            return NodeExecutionResult.waitingUserInput("Waiting for user input", Map.of("stepId", step.id().toString()));
+        }
         var plan = planService.create(state.task().id(), state.run().id(), planDraft);
         stepService.complete(state.task().id(), state.run().id(), step, "Created " + plan.items().size() + " plan items");
         return NodeExecutionResult.success("Created " + plan.items().size() + " plan items", Map.of(
@@ -172,9 +188,12 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         planService.updateItemStatus(item.id(), Domain.PlanItemStatus.IN_PROGRESS);
         var step = stepService.start(state.task().id(), state.run().id(), item.id(),
                 Domain.StepType.EXECUTE_PLAN_ITEM, item.description());
-        var decision = llmGateway.decideNextAction(new ExecutionContext(state.task().id(), state.run().id(), step.id(),
-                item, list(state.transientValue("observedFiles")),
-                toolRecordRepository.findRecentSummariesByRun(state.run().id(), 8), state.recoveryNotes()));
+        var observedFiles = list(state.transientValue("observedFiles"));
+        var decisionResult = decideNextActionWithRecovery(state, state.plan(), item, observedFiles, step.id());
+        if (decisionResult.result() != null) {
+            return decisionResult.result();
+        }
+        var decision = decisionResult.decision();
         ToolExecutionResult last = ToolExecutionResult.success("No action required", Map.of());
         for (var actionDraft : decision.actions()) {
             var action = actionService.create(step.id(), Domain.ActionType.CALL_TOOL, actionDraft.reason(),
@@ -189,6 +208,15 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             if (last.blocked()) {
                 var failure = runtimeFailureService.record(state.task().id(), state.run().id(), step.id(), item.id(),
                         failureClassifier.fromToolResult(last), last.summary(), last.summary());
+                if (Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name().equals(failure.strategy())) {
+                    return replanCurrentItem(state, state.plan(), item, observedFiles, step.id(), failure,
+                            last.summary());
+                }
+                if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                    askUser(state, step.id(), item.id(), failure);
+                    stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, failure.summary());
+                    return NodeExecutionResult.waitingUserInput(failure.summary(), Map.of("stepId", step.id().toString()));
+                }
                 stepService.complete(state.task().id(), state.run().id(), step, last.summary());
                 return new NodeExecutionResult("BLOCKED", last.summary(), Map.of("stepId", step.id().toString()),
                         failure.failureType(), failure.strategy(), state.plan().plan().id(), item.id());
@@ -210,8 +238,12 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                     state.run().id(), command.stepId(), command.actionId(), state.workspace()), command);
             return finishValidationResult(state, step.id(), result);
         }
-        var decision = llmGateway.suggestValidation(new ValidationContext(state.task().id(), state.run().id(),
-                state.workspace().id(), state.recoveryNotes()));
+        var decision = callModelWithRecovery(state, null, null, "suggest validation",
+                () -> llmGateway.suggestValidation(new ValidationContext(state.task().id(), state.run().id(),
+                        state.workspace().id(), state.recoveryNotes())));
+        if (decision == null) {
+            return NodeExecutionResult.waitingUserInput("Waiting for user input");
+        }
         if (!decision.shouldValidate() || decision.executableAndArgs().isEmpty()) {
             if (state.plan() != null) {
                 planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
@@ -246,6 +278,31 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 exitCode == 0, result.summary());
         stepService.complete(state.task().id(), state.run().id(), step, result.summary());
         if (exitCode != 0) {
+            var failure = runtimeFailureService.record(state.task().id(), state.run().id(), step.id(), null,
+                    Domain.RuntimeFailureType.VALIDATION_FAILED, "Validation failed: " + result.summary(),
+                    result.summary());
+            if (Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN.name().equals(failure.strategy())
+                    && state.plan() != null) {
+                var currentItem = state.plan().items().isEmpty() ? null : state.plan().items().getLast();
+                var recoveryDraft = callModelWithRecovery(state, step.id(), null, "replan after validation failure",
+                        () -> llmGateway.replan(new ExecutionContext(state.task().id(), state.run().id(), step.id(),
+                                currentItem, List.of(), toolRecordRepository.findRecentSummariesByRun(state.run().id(), 8),
+                                state.recoveryNotes()), result.summary()));
+                if (recoveryDraft != null) {
+                    planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.ACTIVE);
+                    planService.appendRecoveryItems(state.task().id(), state.run().id(), state.plan().plan().id(),
+                            recoveryDraft, null, result.summary(), failure.id());
+                    return NodeExecutionResult.success("Validation failed; recovery plan appended",
+                            Map.of("stepId", step.id().toString()));
+                }
+                stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, "Waiting for user input");
+                return NodeExecutionResult.waitingUserInput("Waiting for user input", Map.of("stepId", step.id().toString()));
+            }
+            if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                askUser(state, step.id(), null, failure);
+                stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, failure.summary());
+                return NodeExecutionResult.waitingUserInput(failure.summary(), Map.of("stepId", step.id().toString()));
+            }
             return NodeExecutionResult.failure("Validation failed: " + result.summary());
         }
         if (state.plan() != null) {
@@ -315,6 +372,91 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             case "GIT_DIFF" -> gitToolService.diff(context, string(input.get("workingDirectory"), "."));
             default -> ToolExecutionResult.blocked("Unsupported action type: " + type);
         };
+    }
+
+    private AgentDecisionResult decideNextActionWithRecovery(AgentState state, com.nask.agent.plan.PlanView plan,
+                                                             PlanItem item, List<String> observedFiles, UUID stepId) {
+        while (true) {
+            try {
+                var decision = llmGateway.decideNextAction(new ExecutionContext(state.task().id(), state.run().id(), stepId,
+                        item, observedFiles, toolRecordRepository.findRecentSummariesByRun(state.run().id(), 8),
+                        state.recoveryNotes()));
+                return new AgentDecisionResult(decision, null);
+            } catch (LlmGatewayException e) {
+                var failure = runtimeFailureService.record(state.task().id(), state.run().id(), stepId, item.id(),
+                        failureClassifier.fromModelException(e), e.getMessage(), "decide next action");
+                if (Domain.RecoveryStrategy.RETRY_SAME_ACTION.name().equals(failure.strategy())) {
+                    continue;
+                }
+                if (Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name().equals(failure.strategy())) {
+                    return new AgentDecisionResult(null,
+                            replanCurrentItem(state, plan, item, observedFiles, stepId, failure, e.getMessage()));
+                }
+                if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                    askUser(state, stepId, item.id(), failure);
+                    var step = stepService.getRequired(stepId);
+                    stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, failure.summary());
+                    return new AgentDecisionResult(null,
+                            NodeExecutionResult.waitingUserInput(failure.summary(), Map.of("stepId", stepId.toString())));
+                }
+                var step = stepService.getRequired(stepId);
+                stepService.complete(state.task().id(), state.run().id(), step, failure.summary());
+                return new AgentDecisionResult(null,
+                        new NodeExecutionResult("BLOCKED", failure.summary(), Map.of("stepId", stepId.toString()),
+                                failure.failureType(), failure.strategy(), plan.plan().id(), item.id()));
+            }
+        }
+    }
+
+    private record AgentDecisionResult(com.nask.agent.llm.AgentDecision decision, NodeExecutionResult result) {
+    }
+
+    private NodeExecutionResult replanCurrentItem(AgentState state, com.nask.agent.plan.PlanView plan, PlanItem item,
+                                                  List<String> observedFiles, UUID stepId, RuntimeFailure failure,
+                                                  String failureSummary) {
+        var recoveryDraft = callModelWithRecovery(state, stepId, item.id(), "replan current item",
+                () -> llmGateway.replan(new ExecutionContext(state.task().id(), state.run().id(), stepId, item,
+                        observedFiles, toolRecordRepository.findRecentSummariesByRun(state.run().id(), 8),
+                        state.recoveryNotes()), failureSummary));
+        var step = stepService.getRequired(stepId);
+        if (recoveryDraft != null) {
+            planService.updateItemStatus(item.id(), Domain.PlanItemStatus.FAILED);
+            planService.appendRecoveryItems(state.task().id(), state.run().id(), plan.plan().id(), recoveryDraft,
+                    item.id(), failureSummary, failure.id());
+            stepService.complete(state.task().id(), state.run().id(), step,
+                    "Runtime rejected action; recovery plan appended");
+            return NodeExecutionResult.success("Runtime rejected action; recovery plan appended",
+                    Map.of("stepId", stepId.toString()));
+        }
+        stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, "Waiting for user input");
+        return NodeExecutionResult.waitingUserInput("Waiting for user input", Map.of("stepId", stepId.toString()));
+    }
+
+    private <T> T callModelWithRecovery(AgentState state, UUID stepId, UUID planItemId, String decisionType,
+                                        java.util.function.Supplier<T> supplier) {
+        while (true) {
+            try {
+                return supplier.get();
+            } catch (LlmGatewayException e) {
+                var failure = runtimeFailureService.record(state.task().id(), state.run().id(), stepId, planItemId,
+                        failureClassifier.fromModelException(e), e.getMessage(), decisionType);
+                if (Domain.RecoveryStrategy.RETRY_SAME_ACTION.name().equals(failure.strategy())) {
+                    continue;
+                }
+                if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                    askUser(state, stepId, planItemId, failure);
+                    return null;
+                }
+                throw e;
+            }
+        }
+    }
+
+    private void askUser(AgentState state, UUID stepId, UUID planItemId, RuntimeFailure failure) {
+        userInputRequestService.create(state.task().id(), state.run().id(), stepId, planItemId,
+                "Runtime recovery needs guidance for " + failure.failureType(),
+                failure.summary(), List.of("Retry with corrected model output", "Adjust task instructions",
+                        "Cancel task"));
     }
 
     @SuppressWarnings("unchecked")
