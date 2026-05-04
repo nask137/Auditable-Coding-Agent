@@ -5,6 +5,8 @@ import com.nask.agent.report.ReportService;
 import com.nask.agent.run.AgentLoopExecutor;
 import com.nask.agent.run.AgentRun;
 import com.nask.agent.run.AgentRunService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +20,8 @@ import java.util.UUID;
 @Primary
 @Service
 public class WorkflowAgentExecutor implements AgentLoopExecutor {
+    private static final Logger log = LoggerFactory.getLogger(WorkflowAgentExecutor.class);
+
     private final WorkflowService workflowService;
     private final AgentRunService runService;
     private final AgentStateAssembler stateAssembler;
@@ -38,52 +42,56 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
 
     @Override
     public void execute(UUID runId) {
-        var run = runService.getRequired(runId);
-        if (!Domain.AgentRunStatus.RUNNING.name().equals(run.status())) {
-            return;
-        }
-        var workflow = workflowService.resolveForRun(run);
-        var graph = WorkflowGraph.from(workflow);
-        var current = resumeNode(run, graph);
-        var transientData = new HashMap<String, Object>();
-        NodeExecutionResult lastResult = null;
-        var visited = 0;
-        while (current != null) {
-            if (++visited > graph.maxNodes()) {
-                failRun(runId, "Maximum workflow node count exceeded");
+        try {
+            var run = runService.getRequired(runId);
+            if (!Domain.AgentRunStatus.RUNNING.name().equals(run.status())) {
                 return;
             }
-            var node = graph.nodes().get(current);
-            if (node == null) {
-                failRun(runId, "Workflow node not found: " + current);
-                return;
+            var workflow = workflowService.resolveForRun(run);
+            var graph = WorkflowGraph.from(workflow);
+            var current = resumeNode(run, graph);
+            var transientData = new HashMap<String, Object>();
+            NodeExecutionResult lastResult = null;
+            var visited = 0;
+            while (current != null) {
+                if (++visited > graph.maxNodes()) {
+                    failRun(runId, "Maximum workflow node count exceeded");
+                    return;
+                }
+                var node = graph.nodes().get(current);
+                if (node == null) {
+                    failRun(runId, "Workflow node not found: " + current);
+                    return;
+                }
+                var state = withTransientData(stateAssembler.assemble(runId), transientData);
+                var result = nodeRegistry.get(node.type()).execute(state, node);
+                transientData.putAll(result.payload());
+                recordNode(workflow, state, node, result);
+                lastResult = result;
+                if (isPaused(result)) {
+                    return;
+                }
+                if (isFailed(result)) {
+                    failRun(runId, result.summary());
+                    return;
+                }
+                if (Domain.WorkflowNodeType.FINISH.name().equals(node.type())) {
+                    return;
+                }
+                var next = selectNext(graph, node.id(), withTransientData(stateAssembler.assemble(runId), transientData),
+                        result);
+                if (next == null) {
+                    failRun(runId, "No workflow edge matched after node " + node.id() + " with status "
+                            + lastResult.status());
+                    return;
+                }
+                workflowService.recordEdge(state.task().id(), runId, workflow, node.id(), next.to(),
+                        Domain.WorkflowEdgeType.valueOf(next.type()), edgeCondition(next), "Selected by workflow runtime",
+                        Map.of("lastStatus", result.status()));
+                current = next.to();
             }
-            var state = withTransientData(stateAssembler.assemble(runId), transientData);
-            var result = nodeRegistry.get(node.type()).execute(state, node);
-            transientData.putAll(result.payload());
-            recordNode(workflow, state, node, result);
-            lastResult = result;
-            if (isPaused(result)) {
-                return;
-            }
-            if (isFailed(result)) {
-                failRun(runId, result.summary());
-                return;
-            }
-            if (Domain.WorkflowNodeType.FINISH.name().equals(node.type())) {
-                return;
-            }
-            var next = selectNext(graph, node.id(), withTransientData(stateAssembler.assemble(runId), transientData),
-                    result);
-            if (next == null) {
-                failRun(runId, "No workflow edge matched after node " + node.id() + " with status "
-                        + lastResult.status());
-                return;
-            }
-            workflowService.recordEdge(state.task().id(), runId, workflow, node.id(), next.to(),
-                    Domain.WorkflowEdgeType.valueOf(next.type()), edgeCondition(next), "Selected by workflow runtime",
-                    Map.of("lastStatus", result.status()));
-            current = next.to();
+        } catch (RuntimeException e) {
+            failRun(runId, "Workflow execution failed: " + message(e));
         }
     }
 
@@ -175,6 +183,14 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
     private void failRun(UUID runId, String reason) {
         var state = stateAssembler.assemble(runId);
         runService.fail(runId, state.task().id(), reason);
-        reportService.generate(state.task(), runId, "Failed: " + reason);
+        try {
+            reportService.generate(state.task(), runId, "Failed: " + reason);
+        } catch (RuntimeException e) {
+            log.warn("Failed to generate failure report for run {}", runId, e);
+        }
+    }
+
+    private String message(RuntimeException e) {
+        return e.getMessage() == null || e.getMessage().isBlank() ? e.getClass().getSimpleName() : e.getMessage();
     }
 }
