@@ -22,6 +22,9 @@ public class WorkflowNodeRegistry {
     public WorkflowNodeExecutor get(String nodeType) {
         var executor = executors.get(nodeType);
         if (executor == null) {
+            executor = executors.get("*");
+        }
+        if (executor == null) {
             throw new IllegalArgumentException("Unsupported workflow node type: " + nodeType);
         }
         return executor;

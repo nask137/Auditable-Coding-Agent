@@ -1,4 +1,4 @@
 /**
- * Agent run lifecycle and the fixed Phase 1 execution loop.
+ * Agent run lifecycle and legacy loop support.
  */
 package com.nask.agent.run;

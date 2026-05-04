@@ -117,17 +117,72 @@ public class WorkflowService {
 
     private Map<String, Object> definition(String name, Domain.WorkflowMode mode) {
         var nodes = switch (mode) {
-            case REVIEW -> List.of("inspect_workspace", "report", "finish");
-            case TEST -> List.of("inspect_workspace", "validate", "report", "finish");
-            default -> List.of("understand_task", "inspect_workspace", "create_plan", "execute_plan_item",
-                    "validate", "report", "finish");
+            case REVIEW -> List.of(
+                    node("inspect_workspace", Domain.WorkflowNodeType.WORKSPACE_INSPECTION),
+                    node("code_understanding", Domain.WorkflowNodeType.CODE_UNDERSTANDING),
+                    node("report", Domain.WorkflowNodeType.REPORT),
+                    node("finish", Domain.WorkflowNodeType.FINISH));
+            case TEST -> List.of(
+                    node("inspect_workspace", Domain.WorkflowNodeType.WORKSPACE_INSPECTION),
+                    node("validate", Domain.WorkflowNodeType.VALIDATION),
+                    node("report", Domain.WorkflowNodeType.REPORT),
+                    node("finish", Domain.WorkflowNodeType.FINISH));
+            default -> List.of(
+                    node("understand_task", Domain.WorkflowNodeType.TASK_UNDERSTANDING),
+                    node("inspect_workspace", Domain.WorkflowNodeType.WORKSPACE_INSPECTION),
+                    node("project_memory", Domain.WorkflowNodeType.PROJECT_MEMORY),
+                    node("code_understanding", Domain.WorkflowNodeType.CODE_UNDERSTANDING),
+                    node("create_plan", Domain.WorkflowNodeType.PLAN_CREATION),
+                    node("execute_plan_item", Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION),
+                    node("validate", Domain.WorkflowNodeType.VALIDATION),
+                    node("report", Domain.WorkflowNodeType.REPORT),
+                    node("finish", Domain.WorkflowNodeType.FINISH));
+        };
+        var start = switch (mode) {
+            case REVIEW, TEST -> "inspect_workspace";
+            default -> "understand_task";
+        };
+        var edges = switch (mode) {
+            case REVIEW -> List.of(
+                    edge("inspect_workspace", "code_understanding", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("code_understanding", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("report", "finish", Domain.WorkflowEdgeType.ON_SUCCESS));
+            case TEST -> List.of(
+                    edge("inspect_workspace", "validate", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("validate", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("report", "finish", Domain.WorkflowEdgeType.ON_SUCCESS));
+            default -> List.of(
+                    edge("understand_task", "inspect_workspace", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("inspect_workspace", "project_memory", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("project_memory", "code_understanding", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("code_understanding", "create_plan", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("create_plan", "execute_plan_item", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("execute_plan_item", "execute_plan_item", Domain.WorkflowEdgeType.CONDITION,
+                            "plan.hasPendingItems"),
+                    edge("execute_plan_item", "validate", Domain.WorkflowEdgeType.CONDITION, "plan.completed"),
+                    edge("validate", "execute_plan_item", Domain.WorkflowEdgeType.CONDITION, "plan.hasPendingItems"),
+                    edge("validate", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("report", "finish", Domain.WorkflowEdgeType.ON_SUCCESS));
         };
         return Map.of(
                 "name", name,
                 "version", 1,
                 "mode", mode.name(),
-                "start", nodes.getFirst(),
+                "start", start,
                 "limits", Map.of("maxNodes", 30, "maxLoops", 10, "maxFailures", 3),
-                "nodes", nodes);
+                "nodes", nodes,
+                "edges", edges);
+    }
+
+    private Map<String, Object> node(String id, Domain.WorkflowNodeType type) {
+        return Map.of("id", id, "type", type.name(), "input", Map.of());
+    }
+
+    private Map<String, Object> edge(String from, String to, Domain.WorkflowEdgeType type) {
+        return edge(from, to, type, "");
+    }
+
+    private Map<String, Object> edge(String from, String to, Domain.WorkflowEdgeType type, String condition) {
+        return Map.of("from", from, "to", to, "type", type.name(), "condition", condition);
     }
 }

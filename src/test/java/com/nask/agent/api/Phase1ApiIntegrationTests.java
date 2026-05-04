@@ -177,7 +177,8 @@ class Phase1ApiIntegrationTests {
         assertThat(workflow.get("name")).isEqualTo("coding-agent");
         var workflowNodes = getList("/api/runs/" + runId + "/workflow/nodes");
         assertThat(workflowNodes).extracting(node -> node.get("nodeId"))
-                .contains("understand_task", "inspect_workspace", "create_plan", "execute_plan_item", "validate", "finish");
+                .contains("understand_task", "inspect_workspace", "project_memory", "code_understanding",
+                        "create_plan", "execute_plan_item", "validate", "finish");
         var workflowEdges = getList("/api/runs/" + runId + "/workflow/edges");
         assertThat(workflowEdges).isNotEmpty();
     }
@@ -325,7 +326,7 @@ class Phase1ApiIntegrationTests {
         assertThat(getMap("/api/runs/" + runId + "/workflow").get("name")).isEqualTo("review-agent");
         assertThat(getList("/api/runs/" + runId + "/workflow/nodes"))
                 .extracting(node -> node.get("nodeType"))
-                .contains("WORKSPACE_INSPECTION", "REPORT", "FINISH");
+                .contains("WORKSPACE_INSPECTION", "CODE_UNDERSTANDING", "REPORT", "FINISH");
     }
 
     @Test

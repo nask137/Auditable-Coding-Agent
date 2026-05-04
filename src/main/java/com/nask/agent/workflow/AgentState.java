@@ -12,6 +12,7 @@ import com.nask.agent.validation.ValidationResultRecord;
 import com.nask.agent.workspace.Workspace;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Read-only aggregate state used by workflow decisions.
@@ -28,5 +29,9 @@ public record AgentState(
         List<ValidationResultRecord> recentValidationResults,
         UserInputRequestRecord pendingUserInput,
         List<RuntimeFailure> runtimeFailures,
-        List<String> recoveryNotes) {
+        List<String> recoveryNotes,
+        Map<String, Object> transientData) {
+    public Object transientValue(String key) {
+        return transientData.get(key);
+    }
 }

@@ -288,6 +288,8 @@ public final class Domain {
     public enum WorkflowNodeType {
         TASK_UNDERSTANDING,
         WORKSPACE_INSPECTION,
+        PROJECT_MEMORY,
+        CODE_UNDERSTANDING,
         PLAN_CREATION,
         PLAN_ITEM_EXECUTION,
         VALIDATION,
