@@ -2,13 +2,15 @@
 
 ## coding-agent
 
-默认编码工作流。当前实现通过 `WorkflowAgentExecutor` 作为统一入口，复用已经稳定的固定 Agent Loop，并把持久化的 `AgentStep` 回填为 workflow 节点和边记录。
+默认编码工作流。当前实现通过 `WorkflowAgentExecutor` 作为统一入口，由 workflow runtime 解析内置节点和边，并通过 `WorkflowNodeExecutor` 执行节点。固定 `DefaultAgentLoopExecutor` 不再是默认 coding-agent 路径。
 
 能力：
 
 ```text
 理解任务
 检查 workspace
+读取项目记忆上下文
+理解代码上下文
 创建 Plan
 执行 PlanItem
 运行验证
@@ -18,7 +20,7 @@
 记录 WorkflowEdgeDecision
 ```
 
-说明：这是阶段 3 的兼容迁移路径，避免一次性替换阶段 1/2 已验证的安全闭环。后续可以继续把内部执行完全拆成独立节点执行器。
+说明：阶段 4 开始，项目记忆和代码理解作为可组合节点接入；当前节点先从已有运行事实中装配上下文，后续可以替换为持久化项目记忆、索引和代码图谱能力。
 
 ## review-agent
 
@@ -28,6 +30,7 @@
 
 ```text
 列出 workspace 文件
+理解代码上下文
 生成只读审查报告
 记录工作流节点和边
 不创建 FileChange
@@ -61,7 +64,7 @@
 ```text
 命令仍然受 CommandPolicy 控制。
 未加入白名单的命令会进入 WAITING_APPROVAL。
-审批批准后由默认 WorkflowAgentExecutor 恢复运行。
+审批批准后由 `WorkflowAgentExecutor` 从等待中的 workflow 节点恢复运行。
 ```
 
 ## 查询接口

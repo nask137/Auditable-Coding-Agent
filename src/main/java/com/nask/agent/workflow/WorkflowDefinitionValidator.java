@@ -20,8 +20,15 @@ public class WorkflowDefinitionValidator {
         var nodes = definition.get("nodes");
         require(nodes instanceof Collection<?> collection && !collection.isEmpty(),
                 "Workflow nodes must be a non-empty collection");
-        require(((Collection<?>) nodes).contains(definition.get("start").toString()),
+        require(((Collection<?>) nodes).stream().anyMatch(node -> nodeId(node).equals(definition.get("start").toString())),
                 "Workflow start node must exist in nodes");
+    }
+
+    private String nodeId(Object node) {
+        if (node instanceof Map<?, ?> map && map.get("id") != null) {
+            return map.get("id").toString();
+        }
+        return node.toString();
     }
 
     private void require(boolean condition, String message) {

@@ -67,6 +67,7 @@ public class AgentStateAssembler {
                 validationRepository.findByTask(task.id()),
                 userInputRequestService.pendingByRun(runId),
                 failures,
-                List.copyOf(notes));
+                List.copyOf(notes),
+                java.util.Map.of());
     }
 }
