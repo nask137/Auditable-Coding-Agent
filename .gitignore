@@ -34,6 +34,10 @@ build/
 ### ENVIRONMENT ###
 .env
 
+### Python ###
+__pycache__/
+*.py[cod]
+
 ### properties ###
 application-dev.properties
 application-test.properties
