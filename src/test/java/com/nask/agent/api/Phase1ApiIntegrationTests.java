@@ -322,10 +322,13 @@ class Phase1ApiIntegrationTests {
         var proposals = getList("/api/workspaces/" + workspaceId + "/memory-proposals");
         assertThat(proposals).hasSize(1);
         var proposalId = proposals.getFirst().get("id").toString();
+        var approvalId = proposals.getFirst().get("approvalRequestId").toString();
         assertThat(proposals.getFirst().get("status")).isEqualTo("WAITING_APPROVAL");
-        var approvedProposal = post("/api/memory-proposals/" + proposalId + "/approve",
-                Map.of("resolvedBy", "test"));
-        assertThat(approvedProposal.get("status")).isEqualTo("APPROVED");
+        post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "test"));
+        assertThat(getList("/api/workspaces/" + workspaceId + "/memory-proposals"))
+                .filteredOn(proposal -> proposalId.equals(proposal.get("id").toString()))
+                .extracting(proposal -> proposal.get("status"))
+                .containsExactly("APPROVED");
         assertThat(jdbc.queryForObject("""
                 select count(*)
                   from project_memory_item

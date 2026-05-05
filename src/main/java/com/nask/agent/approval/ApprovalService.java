@@ -4,6 +4,7 @@ import com.nask.agent.audit.AuditEventDraft;
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.ApiException;
 import com.nask.agent.common.Domain;
+import com.nask.agent.memory.MemoryApprovalSynchronizer;
 import com.nask.agent.run.AgentRunService;
 import com.nask.agent.step.AgentStepService;
 import com.nask.agent.workflow.WorkflowService;
@@ -27,17 +28,20 @@ public class ApprovalService {
     private final AgentRunService runService;
     private final AgentStepService stepService;
     private final WorkflowService workflowService;
+    private final MemoryApprovalSynchronizer memoryApprovalSynchronizer;
 
     /**
      * Creates an approval service.
      */
     public ApprovalService(ApprovalRepository repository, AuditService auditService, AgentRunService runService,
-                           AgentStepService stepService, WorkflowService workflowService) {
+                           AgentStepService stepService, WorkflowService workflowService,
+                           MemoryApprovalSynchronizer memoryApprovalSynchronizer) {
         this.repository = repository;
         this.auditService = auditService;
         this.runService = runService;
         this.stepService = stepService;
         this.workflowService = workflowService;
+        this.memoryApprovalSynchronizer = memoryApprovalSynchronizer;
     }
 
     /**
@@ -141,6 +145,8 @@ public class ApprovalService {
                 null, null, Map.of()));
         if (!Domain.ApprovalType.MEMORY_WRITE.name().equals(approval.approvalType())) {
             runService.markRunning(approval.runId(), approval.taskId());
+        } else {
+            memoryApprovalSynchronizer.approve(approval, request);
         }
         return getRequired(id);
     }
@@ -168,6 +174,8 @@ public class ApprovalService {
         }
         if (!Domain.ApprovalType.MEMORY_WRITE.name().equals(approval.approvalType())) {
             runService.fail(approval.runId(), approval.taskId(), "Approval denied: " + reason);
+        } else {
+            memoryApprovalSynchronizer.deny(approval);
         }
         return getRequired(id);
     }
