@@ -2,6 +2,7 @@ package com.nask.agent.approval;
 
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.Domain;
+import com.nask.agent.memory.MemoryApprovalSynchronizer;
 import com.nask.agent.run.AgentRunService;
 import com.nask.agent.step.AgentStepService;
 import com.nask.agent.workflow.WorkflowService;
@@ -23,8 +24,9 @@ class ApprovalServiceTests {
     private final AgentRunService runService = mock(AgentRunService.class);
     private final AgentStepService stepService = mock(AgentStepService.class);
     private final WorkflowService workflowService = mock(WorkflowService.class);
+    private final MemoryApprovalSynchronizer memoryApprovalSynchronizer = mock(MemoryApprovalSynchronizer.class);
     private final ApprovalService service = new ApprovalService(repository, auditService, runService, stepService,
-            workflowService);
+            workflowService, memoryApprovalSynchronizer);
 
     @Test
     void consumesMatchingApprovedRequest() {
