@@ -289,6 +289,14 @@ public class ProjectMemoryRepository {
                 .stream().findFirst();
     }
 
+    public Optional<MemoryWriteProposal> findMemoryWriteProposalByApprovalRequestId(UUID approvalRequestId) {
+        return jdbc.query("""
+                select * from memory_write_proposal
+                 where approval_request_id = :approvalRequestId
+                """, new MapSqlParameterSource("approvalRequestId", approvalRequestId),
+                memoryWriteProposalMapper()).stream().findFirst();
+    }
+
     public List<MemoryWriteProposal> findMemoryWriteProposalsByWorkspace(UUID workspaceId) {
         return jdbc.query("""
                 select * from memory_write_proposal

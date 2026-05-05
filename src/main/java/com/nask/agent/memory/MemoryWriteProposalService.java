@@ -84,6 +84,7 @@ public class MemoryWriteProposalService {
         }
         if (proposal.approvalRequestId() != null) {
             approvalService.approve(proposal.approvalRequestId(), request);
+            return getRequired(proposal.id());
         }
         var item = repository.insertProjectMemoryItem(new ProjectMemoryItem(UUID.randomUUID(), proposal.workspaceId(),
                 proposal.proposalType(), "workspace", proposal.title(), proposal.content(),
@@ -110,6 +111,7 @@ public class MemoryWriteProposalService {
         }
         if (proposal.approvalRequestId() != null) {
             approvalService.deny(proposal.approvalRequestId(), request);
+            return getRequired(proposal.id());
         }
         repository.resolveMemoryWriteProposal(proposal.id(), Domain.MemoryWriteProposalStatus.REJECTED.name(), null);
         return getRequired(proposal.id());
