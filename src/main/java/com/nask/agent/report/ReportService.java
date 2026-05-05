@@ -6,6 +6,7 @@ import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.llm.FinalReportDraft;
 import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.ReportContext;
+import com.nask.agent.memory.ProjectMemoryRepository;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.task.CodingTask;
 import com.nask.agent.workflow.WorkflowService;
@@ -26,19 +27,22 @@ public class ReportService {
     private final AuditService auditService;
     private final RuntimeFailureService runtimeFailureService;
     private final WorkflowService workflowService;
+    private final ProjectMemoryRepository projectMemoryRepository;
 
     /**
      * Creates a report service.
      */
     public ReportService(TaskReportRepository repository, LlmGateway llmGateway,
                          FileChangeRepository fileChangeRepository, AuditService auditService,
-                         RuntimeFailureService runtimeFailureService, WorkflowService workflowService) {
+                         RuntimeFailureService runtimeFailureService, WorkflowService workflowService,
+                         ProjectMemoryRepository projectMemoryRepository) {
         this.repository = repository;
         this.llmGateway = llmGateway;
         this.fileChangeRepository = fileChangeRepository;
         this.auditService = auditService;
         this.runtimeFailureService = runtimeFailureService;
         this.workflowService = workflowService;
+        this.projectMemoryRepository = projectMemoryRepository;
     }
 
     /**
@@ -51,9 +55,24 @@ public class ReportService {
         var failures = runtimeFailureService.findByTask(task.id());
         var workflowNodes = workflowService.nodes(runId);
         var workflowEdges = workflowService.edges(runId);
+        var profile = projectMemoryRepository.findProfileByWorkspace(task.workspaceId()).orElse(null);
+        var retrievals = projectMemoryRepository.findMemoryRetrievalsByRun(runId);
+        var proposals = projectMemoryRepository.findMemoryWriteProposalsByRun(runId);
         // The LLM drafts the narrative, while deterministic sections append the
         // exact file-change and audit trails stored by the runtime.
         var content = draft.markdown()
+                + "\n## Project Context\n\n"
+                + (profile == null ? "- Project profile: not available\n"
+                : "- Project profile: %s; frameworks %s; build tools %s; test tools %s\n"
+                .formatted(profile.languageSummary(), profile.frameworks(), profile.buildTools(),
+                        profile.testTools()))
+                + retrievals.stream().map(retrieval -> "- Retrieval `%s`: %s; query `%s`; sources %s"
+                        .formatted(retrieval.id(), retrieval.summary(), retrieval.queryText(),
+                                retrieval.resultRefs().stream().map(this::sourceRef).toList()))
+                .reduce("", (a, b) -> a + b + "\n")
+                + proposals.stream().map(proposal -> "- Memory proposal `%s` `%s`: %s"
+                        .formatted(proposal.id(), proposal.status(), proposal.title()))
+                .reduce("", (a, b) -> a + b + "\n")
                 + "\n## File Changes\n\n"
                 + changes.stream().map(change -> "- `%s` %s".formatted(change.path(), change.changeType()))
                 .reduce("", (a, b) -> a + b + "\n")
@@ -72,6 +91,15 @@ public class ReportService {
                 + events.stream().map(event -> "- %s `%s`".formatted(event.occurredAt(), event.eventType()))
                 .reduce("", (a, b) -> a + b + "\n");
         return repository.insert(new TaskReport(UUID.randomUUID(), task.id(), runId, content, Instant.now()));
+    }
+
+    private String sourceRef(com.nask.agent.memory.SourceReference ref) {
+        if (ref.path() == null || ref.path().isBlank()) {
+            return ref.sourceType() + ":" + ref.sourceId();
+        }
+        var range = ref.lineStart() == null ? "" : ":" + ref.lineStart()
+                + (ref.lineEnd() == null ? "" : "-" + ref.lineEnd());
+        return ref.sourceType() + ":" + ref.path() + range;
     }
 
     /**

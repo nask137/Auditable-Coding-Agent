@@ -48,6 +48,19 @@ public class ApprovalService {
                                         Domain.ApprovalType type, Domain.RiskLevel riskLevel, String reason,
                                         List<String> affectedFiles, String command, String workingDirectory,
                                         String patchPreview) {
+        return create(taskId, runId, stepId, actionId, type, riskLevel, reason, affectedFiles, command,
+                workingDirectory, patchPreview, true);
+    }
+
+    /**
+     * Creates a pending approval request, optionally without pausing a completed
+     * run. Detached approvals are used for post-run memory write proposals.
+     */
+    @Transactional
+    public ApprovalRequestRecord create(UUID taskId, UUID runId, UUID stepId, UUID actionId,
+                                        Domain.ApprovalType type, Domain.RiskLevel riskLevel, String reason,
+                                        List<String> affectedFiles, String command, String workingDirectory,
+                                        String patchPreview, boolean pauseRun) {
         var approval = new ApprovalRequestRecord(UUID.randomUUID(), taskId, runId, stepId, actionId,
                 type.name(), reason, riskLevel.name(), affectedFiles == null ? List.of() : affectedFiles,
                 command, workingDirectory, patchPreview, Domain.ApprovalStatus.PENDING.name(),
@@ -57,7 +70,9 @@ public class ApprovalService {
                 Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN, "Approval required", reason,
                 approval.affectedFiles(), null, approval.id(), null, null, null, riskLevel,
                 Domain.ApprovalStatus.PENDING, true, null, null, Map.of("approvalType", type.name())));
-        runService.markWaitingApproval(runId, taskId);
+        if (pauseRun) {
+            runService.markWaitingApproval(runId, taskId);
+        }
         return approval;
     }
 
@@ -124,7 +139,9 @@ public class ApprovalService {
                 "Approve request", approval.reason(), approval.affectedFiles(), null, approval.id(), null, null,
                 null, Domain.RiskLevel.valueOf(approval.riskLevel()), Domain.ApprovalStatus.APPROVED, true,
                 null, null, Map.of()));
-        runService.markRunning(approval.runId(), approval.taskId());
+        if (!Domain.ApprovalType.MEMORY_WRITE.name().equals(approval.approvalType())) {
+            runService.markRunning(approval.runId(), approval.taskId());
+        }
         return getRequired(id);
     }
 
@@ -141,7 +158,7 @@ public class ApprovalService {
                 "Deny request", reason, approval.affectedFiles(), null, approval.id(), null, null,
                 null, Domain.RiskLevel.valueOf(approval.riskLevel()), Domain.ApprovalStatus.DENIED, true,
                 null, null, Map.of()));
-        if (approval.stepId() != null) {
+        if (approval.stepId() != null && !Domain.ApprovalType.MEMORY_WRITE.name().equals(approval.approvalType())) {
             var step = stepService.getRequired(approval.stepId());
             var outputSummary = "Approval denied: " + reason;
             stepService.fail(approval.taskId(), approval.runId(), step, outputSummary);
@@ -149,7 +166,9 @@ public class ApprovalService {
                     Domain.WorkflowNodeStatus.FAILURE, step.inputSummary(), outputSummary,
                     Map.of("approvalId", approval.id().toString()));
         }
-        runService.fail(approval.runId(), approval.taskId(), "Approval denied: " + reason);
+        if (!Domain.ApprovalType.MEMORY_WRITE.name().equals(approval.approvalType())) {
+            runService.fail(approval.runId(), approval.taskId(), "Approval denied: " + reason);
+        }
         return getRequired(id);
     }
 

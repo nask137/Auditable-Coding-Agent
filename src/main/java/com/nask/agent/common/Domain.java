@@ -142,6 +142,9 @@ public final class Domain {
         UserInputRequested,
         UserInputProvided,
         UserInputCancelled,
+        ProjectScanStarted,
+        ProjectScanCompleted,
+        ProjectScanFailed,
         WorkflowNodeCompleted,
         WorkflowEdgeSelected,
         AgentFinished,
@@ -265,7 +268,8 @@ public final class Domain {
         COMMAND_EXECUTION,
         NETWORK_ACCESS,
         GIT_WRITE,
-        DEPENDENCY_INSTALL
+        DEPENDENCY_INSTALL,
+        MEMORY_WRITE
     }
 
     /**
@@ -273,6 +277,64 @@ public final class Domain {
      */
     public enum ValidationType {
         TEST, BUILD, LINT, TYPE_CHECK, CUSTOM
+    }
+
+    /**
+     * Lifecycle of a phase 4 project scan.
+     */
+    public enum ProjectScanStatus {
+        RUNNING, COMPLETED, FAILED
+    }
+
+    /**
+     * Coarse file classification produced by the phase 4 scanner.
+     */
+    public enum ProjectFileType {
+        SOURCE, TEST, DOCS, CONFIG, BUILD_FILE, MIGRATION, OTHER
+    }
+
+    /**
+     * Type of document chunk stored by the phase 4 document indexer.
+     */
+    public enum IndexedDocumentType {
+        README, DOCS, CONFIG, SOURCE, TEST, MIGRATION, BUILD_FILE, TASK_REPORT, MEMORY
+    }
+
+    /**
+     * Symbol kinds produced by the phase 4 Java outline extractor.
+     */
+    public enum CodeSymbolType {
+        CLASS, INTERFACE, ENUM, RECORD, METHOD, CONSTRUCTOR, FIELD, FUNCTION, CONSTANT
+    }
+
+    /**
+     * Long-lived project memory item categories.
+     */
+    public enum ProjectMemoryType {
+        PROJECT_RULE,
+        TECH_STACK,
+        COMMON_COMMAND,
+        TEST_STRATEGY,
+        MODULE_SUMMARY,
+        ENTRYPOINT,
+        USER_PREFERENCE,
+        TASK_LESSON,
+        FAILURE_PATTERN,
+        DO_NOT_TOUCH
+    }
+
+    /**
+     * Lifecycle of long-lived project memory.
+     */
+    public enum ProjectMemoryStatus {
+        PROPOSED, APPROVED, REJECTED, ARCHIVED, SUPERSEDED
+    }
+
+    /**
+     * Lifecycle of a proposed long-term memory write.
+     */
+    public enum MemoryWriteProposalStatus {
+        WAITING_APPROVAL, APPROVED, REJECTED
     }
 
     /**
@@ -288,11 +350,13 @@ public final class Domain {
     public enum WorkflowNodeType {
         TASK_UNDERSTANDING,
         WORKSPACE_INSPECTION,
+        PROJECT_SCAN,
         PROJECT_MEMORY,
         CODE_UNDERSTANDING,
         PLAN_CREATION,
         PLAN_ITEM_EXECUTION,
         VALIDATION,
+        TASK_SUMMARY_MEMORY,
         REPORT,
         WAIT_APPROVAL,
         WAIT_USER_INPUT,

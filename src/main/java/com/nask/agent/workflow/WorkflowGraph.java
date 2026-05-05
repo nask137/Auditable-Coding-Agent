@@ -52,8 +52,10 @@ record WorkflowGraph(String start, Map<String, MapWorkflowNode> nodes, List<Work
         return switch (id) {
             case "understand_task" -> Domain.WorkflowNodeType.TASK_UNDERSTANDING.name();
             case "inspect_workspace" -> Domain.WorkflowNodeType.WORKSPACE_INSPECTION.name();
+            case "project_scan" -> Domain.WorkflowNodeType.PROJECT_SCAN.name();
             case "project_memory" -> Domain.WorkflowNodeType.PROJECT_MEMORY.name();
             case "code_understanding" -> Domain.WorkflowNodeType.CODE_UNDERSTANDING.name();
+            case "task_summary_memory" -> Domain.WorkflowNodeType.TASK_SUMMARY_MEMORY.name();
             case "create_plan" -> Domain.WorkflowNodeType.PLAN_CREATION.name();
             case "execute_plan_item" -> Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION.name();
             case "validate" -> Domain.WorkflowNodeType.VALIDATION.name();

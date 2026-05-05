@@ -22,6 +22,9 @@ public class AgentSettings {
     private final int maxUserInputRequestsPerRun;
     private final int commandTimeoutSeconds;
     private final int maxReadBytes;
+    private final int projectScanMaxFiles;
+    private final int projectScanMaxFileBytes;
+    private final int projectScanMaxTotalBytes;
 
     /**
      * Test-friendly constructor preserving the phase 1 parameter list.
@@ -29,7 +32,18 @@ public class AgentSettings {
     public AgentSettings(int maxSteps, int maxToolCalls, int maxFileChanges, int maxPatchLines,
                          int maxConsecutiveFailures, int commandTimeoutSeconds, int maxReadBytes) {
         this(maxSteps, maxToolCalls, maxFileChanges, maxPatchLines, maxConsecutiveFailures,
-                2, 2, 3, commandTimeoutSeconds, maxReadBytes);
+                2, 2, 3, commandTimeoutSeconds, maxReadBytes, 2000, 262144, 10485760);
+    }
+
+    /**
+     * Test-friendly constructor preserving the phase 2 parameter list.
+     */
+    public AgentSettings(int maxSteps, int maxToolCalls, int maxFileChanges, int maxPatchLines,
+                         int maxConsecutiveFailures, int maxModelRetries, int maxReplanAttempts,
+                         int maxUserInputRequestsPerRun, int commandTimeoutSeconds, int maxReadBytes) {
+        this(maxSteps, maxToolCalls, maxFileChanges, maxPatchLines, maxConsecutiveFailures, maxModelRetries,
+                maxReplanAttempts, maxUserInputRequestsPerRun, commandTimeoutSeconds, maxReadBytes,
+                2000, 262144, 10485760);
     }
 
     /**
@@ -46,7 +60,10 @@ public class AgentSettings {
             @Value("${agent.loop.max-replan-attempts:2}") int maxReplanAttempts,
             @Value("${agent.loop.max-user-input-requests-per-run:3}") int maxUserInputRequestsPerRun,
             @Value("${agent.command.timeout-seconds:120}") int commandTimeoutSeconds,
-            @Value("${agent.file.max-read-bytes:200000}") int maxReadBytes) {
+            @Value("${agent.file.max-read-bytes:200000}") int maxReadBytes,
+            @Value("${agent.project-scan.max-files:2000}") int projectScanMaxFiles,
+            @Value("${agent.project-scan.max-file-bytes:262144}") int projectScanMaxFileBytes,
+            @Value("${agent.project-scan.max-total-bytes:10485760}") int projectScanMaxTotalBytes) {
         this.maxSteps = maxSteps;
         this.maxToolCalls = maxToolCalls;
         this.maxFileChanges = maxFileChanges;
@@ -57,6 +74,9 @@ public class AgentSettings {
         this.maxUserInputRequestsPerRun = maxUserInputRequestsPerRun;
         this.commandTimeoutSeconds = commandTimeoutSeconds;
         this.maxReadBytes = maxReadBytes;
+        this.projectScanMaxFiles = projectScanMaxFiles;
+        this.projectScanMaxFileBytes = projectScanMaxFileBytes;
+        this.projectScanMaxTotalBytes = projectScanMaxTotalBytes;
     }
 
     /**
@@ -127,5 +147,26 @@ public class AgentSettings {
      */
     public int maxReadBytes() {
         return maxReadBytes;
+    }
+
+    /**
+     * Maximum number of regular files visited by one project scan.
+     */
+    public int projectScanMaxFiles() {
+        return projectScanMaxFiles;
+    }
+
+    /**
+     * Maximum bytes read from one file during project scanning.
+     */
+    public int projectScanMaxFileBytes() {
+        return projectScanMaxFileBytes;
+    }
+
+    /**
+     * Maximum aggregate bytes read during one project scan.
+     */
+    public int projectScanMaxTotalBytes() {
+        return projectScanMaxTotalBytes;
     }
 }

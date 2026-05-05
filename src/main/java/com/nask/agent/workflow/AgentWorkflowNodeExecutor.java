@@ -14,6 +14,10 @@ import com.nask.agent.llm.PlanningContext;
 import com.nask.agent.llm.TaskContext;
 import com.nask.agent.llm.TaskUnderstanding;
 import com.nask.agent.llm.ValidationContext;
+import com.nask.agent.memory.MemoryQuery;
+import com.nask.agent.memory.MemoryWriteProposalService;
+import com.nask.agent.memory.ProjectContextRetriever;
+import com.nask.agent.memory.ProjectMemoryService;
 import com.nask.agent.plan.PlanItem;
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.report.ReportService;
@@ -55,6 +59,9 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     private final FailureClassifier failureClassifier;
     private final AgentRunService runService;
     private final UserInputRequestService userInputRequestService;
+    private final ProjectMemoryService projectMemoryService;
+    private final ProjectContextRetriever projectContextRetriever;
+    private final MemoryWriteProposalService memoryWriteProposalService;
 
     public AgentWorkflowNodeExecutor(AgentStepService stepService, AgentActionService actionService,
                                      PlanService planService, com.nask.agent.llm.LlmGateway llmGateway,
@@ -66,7 +73,10 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                                      ToolRecordRepository toolRecordRepository,
                                      RuntimeFailureService runtimeFailureService,
                                      FailureClassifier failureClassifier, AgentRunService runService,
-                                     UserInputRequestService userInputRequestService) {
+                                     UserInputRequestService userInputRequestService,
+                                     ProjectMemoryService projectMemoryService,
+                                     ProjectContextRetriever projectContextRetriever,
+                                     MemoryWriteProposalService memoryWriteProposalService) {
         this.stepService = stepService;
         this.actionService = actionService;
         this.planService = planService;
@@ -84,6 +94,9 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         this.failureClassifier = failureClassifier;
         this.runService = runService;
         this.userInputRequestService = userInputRequestService;
+        this.projectMemoryService = projectMemoryService;
+        this.projectContextRetriever = projectContextRetriever;
+        this.memoryWriteProposalService = memoryWriteProposalService;
     }
 
     @Override
@@ -96,11 +109,13 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         return switch (Domain.WorkflowNodeType.valueOf(node.type())) {
             case TASK_UNDERSTANDING -> understandTask(state);
             case WORKSPACE_INSPECTION -> inspectWorkspace(state);
+            case PROJECT_SCAN -> projectScan(state);
             case PROJECT_MEMORY -> projectMemory(state);
             case CODE_UNDERSTANDING -> codeUnderstanding(state);
             case PLAN_CREATION -> createPlan(state);
             case PLAN_ITEM_EXECUTION -> executePlanItem(state);
             case VALIDATION -> validate(state);
+            case TASK_SUMMARY_MEMORY -> taskSummaryMemory(state);
             case REPORT -> report(state);
             case FINISH -> finish(state);
             case FAIL -> fail(state);
@@ -140,19 +155,38 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         return completeToolStep(state, step.id(), result, Map.of("stepId", step.id().toString()));
     }
 
+    private NodeExecutionResult projectScan(AgentState state) {
+        var scanRun = projectMemoryService.scan(state.workspace().id());
+        return NodeExecutionResult.success("Project scan " + scanRun.status() + ": " + scanRun.summary(), Map.of(
+                "scanRunId", scanRun.id().toString(),
+                "filesSeen", scanRun.filesSeen(),
+                "filesIndexed", scanRun.filesIndexed(),
+                "filesSkipped", scanRun.filesSkipped()));
+    }
+
     private NodeExecutionResult projectMemory(AgentState state) {
-        var notes = state.recoveryNotes().isEmpty() ? "No project memory recorded yet"
-                : String.join("; ", state.recoveryNotes());
-        return NodeExecutionResult.success(notes, Map.of("memoryNotes", state.recoveryNotes()));
+        var query = string(state.transientValue("taskSummary"), state.task().userRequest()) + " "
+                + String.join(" ", list(state.transientValue("searchHints")));
+        var context = projectContextRetriever.retrieve(new MemoryQuery(state.workspace().id(), query,
+                state.task().id(), state.run().id(), null, List.of(), List.of(), List.of(), 10));
+        return NodeExecutionResult.success(context.summary(), Map.of(
+                "memoryContext", context,
+                "memoryRetrievalId", context.retrievalId().toString(),
+                "memoryResultCount", context.results().size()));
     }
 
     private NodeExecutionResult codeUnderstanding(AgentState state) {
-        var files = state.recentFileChanges().stream()
+        var files = state.memoryContext() == null ? state.recentFileChanges().stream()
                 .map(change -> change.path())
                 .limit(10)
+                .toList() : state.memoryContext().results().stream()
+                .filter(result -> "SYMBOL".equals(result.resultType()))
+                .map(result -> result.source().path())
+                .distinct()
+                .limit(10)
                 .toList();
-        var summary = files.isEmpty() ? "No recent code changes to summarize" : "Recent code changes: " + files;
-        return NodeExecutionResult.success(summary, Map.of("recentChangedFiles", files));
+        var summary = files.isEmpty() ? "No related code symbols found" : "Related code files: " + files;
+        return NodeExecutionResult.success(summary, Map.of("relatedCodeFiles", files));
     }
 
     private NodeExecutionResult createPlan(AgentState state) {
@@ -168,7 +202,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 list(state.transientValue("searchHints")));
         var planDraft = callModelWithRecovery(state, step.id(), null, "create plan",
                 () -> llmGateway.createPlan(new PlanningContext(state.task().id(), state.run().id(), understanding,
-                        list(state.transientValue("observedFiles")), state.recoveryNotes())));
+                        list(state.transientValue("observedFiles")), state.recoveryNotes(), state.memoryContext())));
         if (planDraft == null) {
             stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, "Waiting for user input");
             return NodeExecutionResult.waitingUserInput("Waiting for user input", Map.of("stepId", step.id().toString()));
@@ -240,7 +274,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         }
         var decision = callModelWithRecovery(state, null, null, "suggest validation",
                 () -> llmGateway.suggestValidation(new ValidationContext(state.task().id(), state.run().id(),
-                        state.workspace().id(), state.recoveryNotes())));
+                        state.workspace().id(), state.recoveryNotes(), state.memoryContext())));
         if (decision == null) {
             return NodeExecutionResult.waitingUserInput("Waiting for user input");
         }
@@ -287,7 +321,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 var recoveryDraft = callModelWithRecovery(state, step.id(), null, "replan after validation failure",
                         () -> llmGateway.replan(new ExecutionContext(state.task().id(), state.run().id(), step.id(),
                                 currentItem, List.of(), toolRecordRepository.findRecentSummariesByRun(state.run().id(), 8),
-                                state.recoveryNotes()), result.summary()));
+                                state.recoveryNotes(), state.memoryContext()), result.summary()));
                 if (recoveryDraft != null) {
                     planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.ACTIVE);
                     planService.appendRecoveryItems(state.task().id(), state.run().id(), state.plan().plan().id(),
@@ -318,6 +352,15 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 : "Task completed.";
         reportService.generate(state.task(), state.run().id(), summary);
         return NodeExecutionResult.success("Report generated", Map.of());
+    }
+
+    private NodeExecutionResult taskSummaryMemory(AgentState state) {
+        var proposals = memoryWriteProposalService.proposeForTaskSummary(state);
+        if (proposals.isEmpty()) {
+            return NodeExecutionResult.success("No new task summary memory proposals", Map.of());
+        }
+        return NodeExecutionResult.success("Created " + proposals.size() + " memory write proposal(s)",
+                Map.of("memoryProposalIds", proposals.stream().map(proposal -> proposal.id().toString()).toList()));
     }
 
     private NodeExecutionResult finish(AgentState state) {
@@ -380,7 +423,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             try {
                 var decision = llmGateway.decideNextAction(new ExecutionContext(state.task().id(), state.run().id(), stepId,
                         item, observedFiles, toolRecordRepository.findRecentSummariesByRun(state.run().id(), 8),
-                        state.recoveryNotes()));
+                        state.recoveryNotes(), state.memoryContext()));
                 return new AgentDecisionResult(decision, null);
             } catch (LlmGatewayException e) {
                 var failure = runtimeFailureService.record(state.task().id(), state.run().id(), stepId, item.id(),
@@ -417,7 +460,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         var recoveryDraft = callModelWithRecovery(state, stepId, item.id(), "replan current item",
                 () -> llmGateway.replan(new ExecutionContext(state.task().id(), state.run().id(), stepId, item,
                         observedFiles, toolRecordRepository.findRecentSummariesByRun(state.run().id(), 8),
-                        state.recoveryNotes()), failureSummary));
+                        state.recoveryNotes(), state.memoryContext()), failureSummary));
         var step = stepService.getRequired(stepId);
         if (recoveryDraft != null) {
             planService.updateItemStatus(item.id(), Domain.PlanItemStatus.FAILED);

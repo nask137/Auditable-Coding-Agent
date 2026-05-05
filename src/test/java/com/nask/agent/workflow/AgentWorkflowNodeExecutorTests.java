@@ -14,6 +14,9 @@ import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.LlmGatewayException;
 import com.nask.agent.llm.PlanDraft;
 import com.nask.agent.llm.ValidationDecision;
+import com.nask.agent.memory.ProjectContextRetriever;
+import com.nask.agent.memory.ProjectMemoryService;
+import com.nask.agent.memory.MemoryWriteProposalService;
 import com.nask.agent.plan.Plan;
 import com.nask.agent.plan.PlanItem;
 import com.nask.agent.plan.PlanService;
@@ -64,10 +67,14 @@ class AgentWorkflowNodeExecutorTests {
     private final FailureClassifier failureClassifier = new FailureClassifier();
     private final AgentRunService runService = mock(AgentRunService.class);
     private final UserInputRequestService userInputRequestService = mock(UserInputRequestService.class);
+    private final ProjectMemoryService projectMemoryService = mock(ProjectMemoryService.class);
+    private final ProjectContextRetriever projectContextRetriever = mock(ProjectContextRetriever.class);
+    private final MemoryWriteProposalService memoryWriteProposalService = mock(MemoryWriteProposalService.class);
     private final AgentWorkflowNodeExecutor executor = new AgentWorkflowNodeExecutor(stepService, actionService,
             planService, llmGateway, fileToolService, gitToolService, reportService, commandToolService,
             validationService, settings, fileChangeRepository, commandExecutionRepository, toolRecordRepository,
-            runtimeFailureService, failureClassifier, runService, userInputRequestService);
+            runtimeFailureService, failureClassifier, runService, userInputRequestService, projectMemoryService,
+            projectContextRetriever, memoryWriteProposalService);
 
     @Test
     void replansCurrentItemWhenToolIntentIsRejected() {
@@ -179,7 +186,7 @@ class AgentWorkflowNodeExecutorTests {
         var workflow = new WorkflowDefinition(ids.workflowId(), "coding-agent", 1, "Coding",
                 Domain.WorkflowMode.CODING.name(), true, Map.of(), now, now);
         return new AgentState(task, run, workspace, workflow, plan, currentItem, List.of(), List.of(), List.of(),
-                null, List.of(), List.of(), transientData);
+                null, List.of(), List.of(), null, transientData);
     }
 
     private Plan plan(Ids ids) {
