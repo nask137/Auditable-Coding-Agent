@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import com.nask.agent.memory.MemoryContext;
 
 /**
  * Workflow-native executor for built-in local agent modes.
@@ -112,12 +113,12 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
                 : UUID.fromString(result.payload().get("stepId").toString());
         var status = status(node, result);
         if (stepId != null && workflowService.updateStepNode(state.task().id(), state.run().id(), stepId, status,
-                node.id(), result.summary(), result.payload())) {
+                node.id(), result.summary(), persistedPayload(result.payload()))) {
             return;
         }
         workflowService.recordNode(state.task().id(), state.run().id(), workflow, node.id(),
                 Domain.WorkflowNodeType.valueOf(node.type()), stepId, status, node.id(), result.summary(),
-                result.payload());
+                persistedPayload(result.payload()));
     }
 
     private Domain.WorkflowNodeStatus status(MapWorkflowNode node, NodeExecutionResult result) {
@@ -177,7 +178,25 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
         return new AgentState(state.task(), state.run(), state.workspace(), state.workflow(), state.plan(),
                 state.currentPlanItem(), state.recentFileChanges(), state.recentCommandExecutions(),
                 state.recentValidationResults(), state.pendingUserInput(), state.runtimeFailures(),
-                state.recoveryNotes(), Map.copyOf(transientData));
+                state.recoveryNotes(), memoryContext(transientData), Map.copyOf(transientData));
+    }
+
+    private MemoryContext memoryContext(Map<String, Object> transientData) {
+        var value = transientData.get("memoryContext");
+        return value instanceof MemoryContext context ? context : null;
+    }
+
+    private Map<String, Object> persistedPayload(Map<String, Object> payload) {
+        var persisted = new HashMap<String, Object>(payload);
+        var context = persisted.get("memoryContext");
+        if (context instanceof MemoryContext memoryContext) {
+            persisted.put("memoryContext", Map.of(
+                    "retrievalId", memoryContext.retrievalId().toString(),
+                    "queryText", memoryContext.queryText(),
+                    "resultCount", memoryContext.results().size(),
+                    "summary", memoryContext.summary()));
+        }
+        return persisted;
     }
 
     private void failRun(UUID runId, String reason) {

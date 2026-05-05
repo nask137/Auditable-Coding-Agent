@@ -9,6 +9,9 @@ import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.file.FileToolService;
 import com.nask.agent.git.GitToolService;
 import com.nask.agent.llm.LlmGateway;
+import com.nask.agent.memory.ProjectContextRetriever;
+import com.nask.agent.memory.ProjectMemoryService;
+import com.nask.agent.memory.MemoryWriteProposalService;
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.report.ReportService;
 import com.nask.agent.run.AgentRun;
@@ -73,7 +76,8 @@ class WorkflowAgentExecutorTests {
                 new AgentSettings(10, 20, 1000, 300, 3, 2, 2, 3, 120, 200000),
                 mock(FileChangeRepository.class), mock(CommandExecutionRepository.class),
                 mock(ToolRecordRepository.class), mock(RuntimeFailureService.class), new FailureClassifier(),
-                runService, mock(UserInputRequestService.class));
+                runService, mock(UserInputRequestService.class), mock(ProjectMemoryService.class),
+                mock(ProjectContextRetriever.class), mock(MemoryWriteProposalService.class));
     }
 
     private WorkflowDefinition workflow(Ids ids) {
@@ -99,7 +103,7 @@ class WorkflowAgentExecutorTests {
         var workspace = new Workspace(ids.workspaceId(), "workspace", "D:/tmp/workspace", true, List.of(), List.of(),
                 List.of(), now, now);
         return new AgentState(task, run, workspace, workflow, null, null, List.of(), List.of(), List.of(),
-                null, List.of(), List.of(), Map.of());
+                null, List.of(), List.of(), null, Map.of());
     }
 
     private Ids ids() {

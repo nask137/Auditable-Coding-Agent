@@ -50,6 +50,6 @@ create table workflow_edge_decision (
 
 create index idx_workflow_edge_decision_run_created on workflow_edge_decision(run_id, created_at, id);
 
-comment on table workflow_definition is '阶段 3 工作流定义';
-comment on table workflow_node_execution is '阶段 3 工作流节点执行记录';
-comment on table workflow_edge_decision is '阶段 3 工作流边选择记录';
+comment on table workflow_definition is '工作流定义';
+comment on table workflow_node_execution is '工作流节点执行记录';
+comment on table workflow_edge_decision is '工作流边选择记录';

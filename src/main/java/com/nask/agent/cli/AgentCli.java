@@ -4,9 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import picocli.CommandLine;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -36,6 +39,17 @@ import java.util.concurrent.Callable;
                 AgentCli.WorkflowCommand.class,
                 AgentCli.WorkflowStatusCommand.class,
                 AgentCli.WorkflowPathCommand.class,
+                AgentCli.ScanCommand.class,
+                AgentCli.ProfileCommand.class,
+                AgentCli.SymbolsCommand.class,
+                AgentCli.OutlineCommand.class,
+                AgentCli.ContextCommand.class,
+                AgentCli.MemoryCommand.class,
+                AgentCli.RememberCommand.class,
+                AgentCli.MemoryProposalsCommand.class,
+                AgentCli.MemoryApproveCommand.class,
+                AgentCli.MemoryRejectCommand.class,
+                AgentCli.MemoryRetrievalsCommand.class,
                 AgentCli.CommandPolicyCommand.class
         })
 public class AgentCli implements Callable<Integer> {
@@ -228,6 +242,216 @@ public class AgentCli implements Callable<Integer> {
             var root = (AgentCli) spec.root().userObject();
             System.out.println(root.get("/api/runs/" + runId + "/workflow/nodes"));
             System.out.println(root.get("/api/runs/" + runId + "/workflow/edges"));
+            return 0;
+        }
+    }
+
+    /**
+     * Triggers a bounded project scan for a workspace.
+     */
+    @CommandLine.Command(name = "scan")
+    static class ScanCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.post("/api/workspaces/" + workspaceId + "/scan", null));
+            return 0;
+        }
+    }
+
+    /**
+     * Displays the latest project profile for a workspace.
+     */
+    @CommandLine.Command(name = "profile")
+    static class ProfileCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workspaces/" + workspaceId + "/profile"));
+            return 0;
+        }
+    }
+
+    /**
+     * Searches indexed code symbols for a workspace.
+     */
+    @CommandLine.Command(name = "symbols")
+    static class SymbolsCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+        @CommandLine.Option(names = "--query", defaultValue = "") String query;
+        @CommandLine.Option(names = "--type", defaultValue = "") String type;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workspaces/" + workspaceId + "/symbols?query="
+                    + encode(query) + "&type=" + encode(type)));
+            return 0;
+        }
+    }
+
+    /**
+     * Displays indexed symbols for one workspace-relative file.
+     */
+    @CommandLine.Command(name = "outline")
+    static class OutlineCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+        @CommandLine.Option(names = "--path", required = true) String path;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workspaces/" + workspaceId + "/outline?path=" + encode(path)));
+            return 0;
+        }
+    }
+
+    /**
+     * Retrieves project context using the unified memory search service.
+     */
+    @CommandLine.Command(name = "context")
+    static class ContextCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+        @CommandLine.Option(names = "--query", defaultValue = "") String query;
+        @CommandLine.Option(names = "--memory-type", defaultValue = "") String memoryType;
+        @CommandLine.Option(names = "--document-type", defaultValue = "") String documentType;
+        @CommandLine.Option(names = "--symbol-type", defaultValue = "") String symbolType;
+        @CommandLine.Option(names = "--limit", defaultValue = "10") int limit;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workspaces/" + workspaceId + "/search-context?q="
+                    + encode(query) + optional("memoryType", memoryType)
+                    + optional("documentType", documentType) + optional("symbolType", symbolType)
+                    + "&limit=" + limit));
+            return 0;
+        }
+    }
+
+    /**
+     * Lists project memory items for a workspace.
+     */
+    @CommandLine.Command(name = "memory")
+    static class MemoryCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workspaces/" + workspaceId + "/memory"));
+            return 0;
+        }
+    }
+
+    /**
+     * Manually records an approved project memory item.
+     */
+    @CommandLine.Command(name = "remember")
+    static class RememberCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+        @CommandLine.Option(names = "--type", required = true) String type;
+        @CommandLine.Option(names = "--title", required = true) String title;
+        @CommandLine.Option(names = "--content", required = true) String content;
+        @CommandLine.Option(names = "--scope", defaultValue = "workspace") String scope;
+        @CommandLine.Option(names = "--status", defaultValue = "APPROVED") String status;
+        @CommandLine.Option(names = "--confidence", defaultValue = "1.0") double confidence;
+        @CommandLine.Option(names = "--source-path", defaultValue = "") String sourcePath;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            var body = new LinkedHashMap<String, Object>();
+            body.put("memoryType", type);
+            body.put("title", title);
+            body.put("content", content);
+            body.put("scope", scope);
+            body.put("status", status);
+            body.put("confidence", confidence);
+            body.put("createdBy", "cli");
+            if (sourcePath != null && !sourcePath.isBlank()) {
+                body.put("sourcePath", sourcePath);
+                body.put("sourceType", "USER");
+            }
+            System.out.println(root.post("/api/workspaces/" + workspaceId + "/memory", body));
+            return 0;
+        }
+    }
+
+    /**
+     * Lists memory write proposals for a workspace.
+     */
+    @CommandLine.Command(name = "memory-proposals")
+    static class MemoryProposalsCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workspaces/" + workspaceId + "/memory-proposals"));
+            return 0;
+        }
+    }
+
+    /**
+     * Approves a memory write proposal.
+     */
+    @CommandLine.Command(name = "memory-approve")
+    static class MemoryApproveCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String proposalId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.post("/api/memory-proposals/" + proposalId + "/approve",
+                    Map.of("resolvedBy", "cli")));
+            return 0;
+        }
+    }
+
+    /**
+     * Rejects a memory write proposal.
+     */
+    @CommandLine.Command(name = "memory-reject")
+    static class MemoryRejectCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String proposalId;
+        @CommandLine.Option(names = "--reason", defaultValue = "Rejected from CLI") String reason;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.post("/api/memory-proposals/" + proposalId + "/reject",
+                    Map.of("resolvedBy", "cli", "reason", reason)));
+            return 0;
+        }
+    }
+
+    /**
+     * Lists persisted memory retrieval records for a workspace.
+     */
+    @CommandLine.Command(name = "memory-retrievals")
+    static class MemoryRetrievalsCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(index = "0") String workspaceId;
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            System.out.println(root.get("/api/workspaces/" + workspaceId + "/memory-retrievals"));
             return 0;
         }
     }
@@ -499,5 +723,16 @@ public class AgentCli implements Callable<Integer> {
             System.out.println(root.get("/api/workspaces/" + workspaceId + "/command-policies"));
             return 0;
         }
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
+    }
+
+    private static String optional(String name, String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return "&" + name + "=" + encode(value);
     }
 }

@@ -55,7 +55,11 @@ public class LlmPromptFactory {
 
                 Runtime recovery notes:
                 %s
-                """.formatted(context.understanding(), context.observedFiles(), context.recoveryNotes()));
+
+                Project memory context:
+                %s
+                """.formatted(context.understanding(), context.observedFiles(), context.recoveryNotes(),
+                memorySummary(context.memoryContext())));
     }
 
     public LlmPrompt agentDecision(ExecutionContext context) {
@@ -93,8 +97,11 @@ public class LlmPromptFactory {
 
                 Runtime recovery notes:
                 %s
+
+                Project memory context:
+                %s
                 """.formatted(context.currentItem().id(), context.currentItem(), context.observedFiles(),
-                context.recentToolResults(), context.recoveryNotes()));
+                context.recentToolResults(), context.recoveryNotes(), memorySummary(context.memoryContext())));
     }
 
     public LlmPrompt replan(ExecutionContext context, String failureSummary) {
@@ -126,8 +133,11 @@ public class LlmPromptFactory {
 
                 Runtime recovery notes:
                 %s
+
+                Project memory context:
+                %s
                 """.formatted(context.currentItem(), failureSummary, context.observedFiles(),
-                context.recentToolResults(), context.recoveryNotes()));
+                context.recentToolResults(), context.recoveryNotes(), memorySummary(context.memoryContext())));
     }
 
     public LlmPrompt validationDecision(ValidationContext context) {
@@ -147,7 +157,11 @@ public class LlmPromptFactory {
 
                 Runtime recovery notes:
                 %s
-                """.formatted(context.taskId(), context.runId(), context.workspaceId(), context.recoveryNotes()));
+
+                Project memory context:
+                %s
+                """.formatted(context.taskId(), context.runId(), context.workspaceId(), context.recoveryNotes(),
+                memorySummary(context.memoryContext())));
     }
 
     public LlmPrompt finalReport(ReportContext context) {
@@ -164,5 +178,19 @@ public class LlmPromptFactory {
                 Runtime result summary:
                 %s
                 """.formatted(context.taskSummary(), context.resultSummary()));
+    }
+
+    private String memorySummary(com.nask.agent.memory.MemoryContext context) {
+        if (context == null) {
+            return "No project memory context retrieved.";
+        }
+        var profile = context.profile() == null ? "No project profile." : context.profile().languageSummary();
+        var results = context.results().stream()
+                .limit(8)
+                .map(result -> "- %s %.1f %s %s".formatted(result.resultType(), result.score(),
+                        result.title(), result.source()))
+                .toList();
+        return "Retrieval %s: %s%nProfile: %s%nResults:%n%s".formatted(
+                context.retrievalId(), context.summary(), profile, String.join("\n", results));
     }
 }

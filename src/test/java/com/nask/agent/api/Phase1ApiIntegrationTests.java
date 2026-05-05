@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -100,7 +101,143 @@ class Phase1ApiIntegrationTests {
                 )
                 """);
         jdbc.execute("""
+                create table if not exists project_scan_run (
+                  id uuid primary key,
+                  workspace_id uuid not null references workspace(id),
+                  task_id uuid references task(id),
+                  run_id uuid references agent_run(id),
+                  status text not null,
+                  scan_reason text not null,
+                  started_at timestamptz not null,
+                  completed_at timestamptz,
+                  files_seen int not null,
+                  files_indexed int not null,
+                  files_skipped int not null,
+                  summary text not null,
+                  metadata_json jsonb not null
+                )
+                """);
+        jdbc.execute("""
+                create table if not exists project_profile (
+                  id uuid primary key,
+                  workspace_id uuid not null references workspace(id),
+                  language_summary text not null,
+                  frameworks_json jsonb not null,
+                  build_tools_json jsonb not null,
+                  test_tools_json jsonb not null,
+                  package_managers_json jsonb not null,
+                  entrypoints_json jsonb not null,
+                  important_paths_json jsonb not null,
+                  docs_paths_json jsonb not null,
+                  config_paths_json jsonb not null,
+                  last_scan_run_id uuid references project_scan_run(id),
+                  confidence numeric(5, 2) not null,
+                  created_at timestamptz not null,
+                  updated_at timestamptz not null,
+                  constraint uq_project_profile_workspace unique (workspace_id)
+                )
+                """);
+        jdbc.execute("""
+                create table if not exists indexed_document (
+                  id uuid primary key,
+                  workspace_id uuid not null references workspace(id),
+                  scan_run_id uuid references project_scan_run(id),
+                  path text not null,
+                  document_type text not null,
+                  title text not null,
+                  chunk_index int not null,
+                  content text not null,
+                  content_hash text not null,
+                  line_start int not null,
+                  line_end int not null,
+                  token_count int not null,
+                  metadata_json jsonb not null,
+                  created_at timestamptz not null,
+                  constraint uq_indexed_document_content unique (workspace_id, document_type, path, chunk_index, content_hash)
+                )
+                """);
+        jdbc.execute("""
+                create table if not exists code_symbol (
+                  id uuid primary key,
+                  workspace_id uuid not null references workspace(id),
+                  scan_run_id uuid references project_scan_run(id),
+                  path text not null,
+                  language text not null,
+                  symbol_type text not null,
+                  symbol_name text not null,
+                  container_name text,
+                  signature text not null,
+                  line_start int not null,
+                  line_end int not null,
+                  visibility text,
+                  metadata_json jsonb not null,
+                  created_at timestamptz not null
+                )
+                """);
+        jdbc.execute("""
+                create table if not exists project_memory_item (
+                  id uuid primary key,
+                  workspace_id uuid not null references workspace(id),
+                  memory_type text not null,
+                  scope text not null,
+                  title text not null,
+                  content text not null,
+                  source_type text not null,
+                  source_id uuid,
+                  source_path text,
+                  source_line_start int,
+                  source_line_end int,
+                  status text not null,
+                  confidence numeric(5, 2) not null,
+                  expires_at timestamptz,
+                  created_by text not null,
+                  created_at timestamptz not null,
+                  approved_by text,
+                  approved_at timestamptz,
+                  metadata_json jsonb not null
+                )
+                """);
+        jdbc.execute("""
+                create table if not exists memory_retrieval (
+                  id uuid primary key,
+                  workspace_id uuid not null references workspace(id),
+                  task_id uuid references task(id),
+                  run_id uuid references agent_run(id),
+                  workflow_node_execution_id uuid references workflow_node_execution(id),
+                  query_text text not null,
+                  filters_json jsonb not null,
+                  result_refs_json jsonb not null,
+                  summary text not null,
+                  created_at timestamptz not null
+                )
+                """);
+        jdbc.execute("""
+                create table if not exists memory_write_proposal (
+                  id uuid primary key,
+                  workspace_id uuid not null references workspace(id),
+                  task_id uuid references task(id),
+                  run_id uuid references agent_run(id),
+                  proposal_type text not null,
+                  title text not null,
+                  content text not null,
+                  source_refs_json jsonb not null,
+                  status text not null,
+                  approval_request_id uuid references approval_request(id),
+                  project_memory_item_id uuid references project_memory_item(id),
+                  created_at timestamptz not null,
+                  resolved_at timestamptz,
+                  metadata_json jsonb not null
+                )
+                """);
+        jdbc.execute("""
                 truncate table
+                  memory_write_proposal,
+                  memory_retrieval,
+                  project_memory_item,
+                  code_symbol,
+                  indexed_document,
+                  project_profile,
+                  project_scan_run,
                   workflow_edge_decision,
                   workflow_node_execution,
                   workflow_definition,
@@ -170,6 +307,7 @@ class Phase1ApiIntegrationTests {
         var report = getMap("/api/tasks/" + taskId + "/report");
         assertThat(report.get("contentMd").toString()).contains("Validation passed");
         assertThat(report.get("contentMd").toString()).contains("AGENT_TASK_NOTE.md");
+        assertThat(report.get("contentMd").toString()).contains("## Project Context");
         assertThat(report.get("contentMd").toString()).contains("## Workflow");
 
         var runId = run.get("id").toString();
@@ -178,9 +316,178 @@ class Phase1ApiIntegrationTests {
         var workflowNodes = getList("/api/runs/" + runId + "/workflow/nodes");
         assertThat(workflowNodes).extracting(node -> node.get("nodeId"))
                 .contains("understand_task", "inspect_workspace", "project_memory", "code_understanding",
-                        "create_plan", "execute_plan_item", "validate", "finish");
+                        "create_plan", "execute_plan_item", "validate", "task_summary_memory", "finish");
         var workflowEdges = getList("/api/runs/" + runId + "/workflow/edges");
         assertThat(workflowEdges).isNotEmpty();
+        var proposals = getList("/api/workspaces/" + workspaceId + "/memory-proposals");
+        assertThat(proposals).hasSize(1);
+        var proposalId = proposals.getFirst().get("id").toString();
+        assertThat(proposals.getFirst().get("status")).isEqualTo("WAITING_APPROVAL");
+        var approvedProposal = post("/api/memory-proposals/" + proposalId + "/approve",
+                Map.of("resolvedBy", "test"));
+        assertThat(approvedProposal.get("status")).isEqualTo("APPROVED");
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from project_memory_item
+                 where workspace_id = ?::uuid
+                   and status = 'APPROVED'
+                   and memory_type = 'TASK_LESSON'
+                """, Integer.class, workspaceId)).isEqualTo(1);
+        assertThat(getList("/api/workspaces/" + workspaceId + "/memory"))
+                .extracting(memory -> memory.get("memoryType"))
+                .contains("TASK_LESSON");
+    }
+
+    @Test
+    void phase4ScanCreatesProjectProfileAndAuditEvents() throws Exception {
+        Files.createDirectories(workspaceDir.resolve("src/main/java/com/example"));
+        Files.createDirectories(workspaceDir.resolve("src/test/java/com/example"));
+        Files.createDirectories(workspaceDir.resolve("src/main/resources/db/migration"));
+        Files.createDirectories(workspaceDir.resolve("docs"));
+        Files.writeString(workspaceDir.resolve("pom.xml"), """
+                <project>
+                  <dependencies>
+                    <dependency>
+                      <groupId>org.springframework.boot</groupId>
+                      <artifactId>spring-boot-starter-test</artifactId>
+                    </dependency>
+                  </dependencies>
+                </project>
+                """);
+        Files.writeString(workspaceDir.resolve("README.md"), "scan me");
+        Files.writeString(workspaceDir.resolve("docs/design.md"), "design");
+        Files.writeString(workspaceDir.resolve("src/main/java/com/example/App.java"),
+                """
+                import org.springframework.boot.autoconfigure.SpringBootApplication;
+                @SpringBootApplication
+                public class App {
+                    private static final String NAME = "app";
+                    public App() {
+                    }
+                    public String name() {
+                        return NAME;
+                    }
+                }
+                """);
+        Files.writeString(workspaceDir.resolve("src/test/java/com/example/AppTests.java"),
+                "import org.junit.jupiter.api.Test; class AppTests {}");
+        Files.writeString(workspaceDir.resolve("src/main/resources/db/migration/V1__init.sql"),
+                "create table example(id int);");
+
+        var workspace = post("/api/workspaces", Map.of(
+                "name", "phase4",
+                "rootPath", workspaceDir.toString(),
+                "trusted", true));
+        var workspaceId = workspace.get("id").toString();
+        var taskId = UUID.randomUUID();
+        var runId = UUID.randomUUID();
+        jdbc.update("""
+                insert into task (id, workspace_id, title, user_request, status, created_at, updated_at)
+                values (?, ?::uuid, 'historical task', 'summarize project', 'COMPLETED', now(), now())
+                """, taskId, workspaceId);
+        jdbc.update("""
+                insert into agent_run (id, task_id, agent_mode, status, started_at, finished_at, failure_reason, runtime_metadata)
+                values (?, ?, 'CODE_EDIT', 'COMPLETED', now(), now(), null, '{}'::jsonb)
+                """, runId, taskId);
+        jdbc.update("""
+                insert into task_report (id, task_id, run_id, content_md, created_at)
+                values (?, ?, ?, '## Historical Report\n\nUse mvn test for validation.', now())
+                """, UUID.randomUUID(), taskId, runId);
+
+        var scan = post("/api/workspaces/" + workspaceId + "/scan", null);
+        assertThat(scan.get("status")).isEqualTo("COMPLETED");
+        assertThat(((Number) scan.get("filesIndexed")).intValue()).isGreaterThanOrEqualTo(5);
+
+        var profile = getMap("/api/workspaces/" + workspaceId + "/profile");
+        assertThat(profile.get("languageSummary").toString()).contains("Java");
+        assertThat(stringList(profile.get("frameworks"))).contains("Spring Boot", "Flyway");
+        assertThat(stringList(profile.get("buildTools"))).contains("Maven");
+        assertThat(stringList(profile.get("testTools"))).contains("JUnit");
+        assertThat(stringList(profile.get("docsPaths"))).contains("README.md", "docs/design.md");
+
+        var scanRuns = getList("/api/workspaces/" + workspaceId + "/scan-runs");
+        assertThat(scanRuns).hasSize(1);
+        assertThat(scanRuns.getFirst().get("status")).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForList("""
+                select distinct document_type
+                  from indexed_document
+                 where workspace_id = ?::uuid
+                 order by document_type
+                """, String.class, workspaceId)).contains("README", "DOCS", "BUILD_FILE", "MIGRATION", "TASK_REPORT");
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from indexed_document
+                 where workspace_id = ?::uuid
+                   and document_type = 'TASK_REPORT'
+                   and content like '%mvn test%'
+                """, Integer.class, workspaceId)).isEqualTo(1);
+        Files.writeString(workspaceDir.resolve("README.md"), "scan me after update");
+        post("/api/workspaces/" + workspaceId + "/scan", null);
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from indexed_document
+                 where workspace_id = ?::uuid
+                   and path = 'README.md'
+                   and content like '%scan me%'
+                """, Integer.class, workspaceId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from indexed_document
+                 where workspace_id = ?::uuid
+                   and path = 'README.md'
+                   and content = 'scan me'
+                """, Integer.class, workspaceId)).isZero();
+        assertThat(jdbc.queryForList("""
+                select symbol_type
+                  from code_symbol
+                 where workspace_id = ?::uuid
+                   and path = 'src/main/java/com/example/App.java'
+                 order by line_start
+                """, String.class, workspaceId)).contains("CLASS", "CONSTANT", "CONSTRUCTOR", "METHOD");
+        var symbols = getList("/api/workspaces/" + workspaceId + "/symbols?query=name&type=METHOD");
+        assertThat(symbols).hasSize(1);
+        assertThat(symbols.getFirst().get("symbolName")).isEqualTo("name");
+        var outline = getList("/api/workspaces/" + workspaceId
+                + "/outline?path=src/main/java/com/example/App.java");
+        assertThat(outline).extracting(symbol -> symbol.get("symbolName")).contains("App", "NAME", "name");
+        jdbc.update("""
+                insert into project_memory_item (
+                  id, workspace_id, memory_type, scope, title, content, source_type, source_id,
+                  source_path, source_line_start, source_line_end, status, confidence, expires_at,
+                  created_by, created_at, approved_by, approved_at, metadata_json
+                ) values (
+                  ?, ?::uuid, 'COMMON_COMMAND', 'workspace', 'Maven test command',
+                  'Use mvn test for validation in this repository.', 'USER', null,
+                  'README.md', 1, 1, 'APPROVED', 0.95, null, 'test', now(), 'test', now(), '{}'::jsonb
+                )
+                """, UUID.randomUUID(), workspaceId);
+        var context = getMap("/api/workspaces/" + workspaceId
+                + "/search-context?q=mvn%20test%20App&documentType=TASK_REPORT&symbolType=CLASS&limit=5");
+        assertThat(context.get("retrievalId")).isNotNull();
+        assertThat(((List<?>) context.get("results"))).isNotEmpty();
+        assertThat(context.get("summary").toString()).contains("Retrieved");
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from memory_retrieval
+                 where workspace_id = ?::uuid
+                   and query_text = 'mvn test App'
+                """, Integer.class, workspaceId)).isEqualTo(1);
+        assertThat(getList("/api/workspaces/" + workspaceId + "/memory-retrievals")).hasSize(1);
+        var manualMemory = post("/api/workspaces/" + workspaceId + "/memory", Map.of(
+                "memoryType", "PROJECT_RULE",
+                "title", "Keep changes small",
+                "content", "Prefer small auditable patches.",
+                "createdBy", "test"));
+        assertThat(manualMemory.get("status")).isEqualTo("APPROVED");
+        assertThat(getList("/api/workspaces/" + workspaceId + "/memory"))
+                .extracting(memory -> memory.get("memoryType"))
+                .contains("PROJECT_RULE");
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                  from audit_event
+                 where event_type in ('ProjectScanStarted', 'ProjectScanCompleted')
+                   and metadata ->> 'workspaceId' = ?
+                """, Integer.class, workspaceId)).isEqualTo(4);
     }
 
     @Test
@@ -591,5 +898,9 @@ class Phase1ApiIntegrationTests {
 
     private URI uri(String path) {
         return URI.create("http://localhost:" + port + path);
+    }
+
+    private List<String> stringList(Object value) {
+        return ((List<?>) value).stream().map(Object::toString).toList();
     }
 }

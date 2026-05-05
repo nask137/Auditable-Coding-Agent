@@ -39,7 +39,7 @@ create table user_input_request (
 create index idx_user_input_request_status_created on user_input_request(status, created_at);
 create index idx_user_input_request_run_status on user_input_request(run_id, status);
 
-comment on table runtime_failure is '阶段 2 运行时失败记录';
+comment on table runtime_failure is '运行时失败记录';
 comment on column runtime_failure.id is '运行时失败ID';
 comment on column runtime_failure.task_id is '关联任务ID';
 comment on column runtime_failure.run_id is '关联代理运行ID';
@@ -57,7 +57,7 @@ comment on column runtime_failure.related_file_change_id is '关联文件变更I
 comment on column runtime_failure.attempt is '同类失败或恢复策略尝试次数';
 comment on column runtime_failure.created_at is '创建时间';
 
-comment on table user_input_request is '阶段 2 用户介入请求';
+comment on table user_input_request is '用户介入请求';
 comment on column user_input_request.id is '用户介入请求ID';
 comment on column user_input_request.task_id is '关联任务ID';
 comment on column user_input_request.run_id is '关联代理运行ID';

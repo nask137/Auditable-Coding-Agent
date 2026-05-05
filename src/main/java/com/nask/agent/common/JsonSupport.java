@@ -14,6 +14,8 @@ import java.util.Map;
 public class JsonSupport {
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
     };
+    private static final TypeReference<List<Map<String, Object>>> OBJECT_LIST = new TypeReference<>() {
+    };
     private static final TypeReference<Map<String, Object>> OBJECT_MAP = new TypeReference<>() {
     };
 
@@ -64,6 +66,20 @@ public class JsonSupport {
             return objectMapper.readValue(json, OBJECT_MAP);
         } catch (Exception e) {
             throw new IllegalArgumentException("Unable to parse JSON object", e);
+        }
+    }
+
+    /**
+     * Parses a JSON array of objects, returning an empty list for blank values.
+     */
+    public List<Map<String, Object>> toObjectList(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, OBJECT_LIST);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Unable to parse JSON object list", e);
         }
     }
 }

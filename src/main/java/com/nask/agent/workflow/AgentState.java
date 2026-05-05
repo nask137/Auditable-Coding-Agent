@@ -2,6 +2,7 @@ package com.nask.agent.workflow;
 
 import com.nask.agent.command.CommandExecution;
 import com.nask.agent.file.FileChange;
+import com.nask.agent.memory.MemoryContext;
 import com.nask.agent.plan.PlanItem;
 import com.nask.agent.plan.PlanView;
 import com.nask.agent.run.AgentRun;
@@ -30,6 +31,7 @@ public record AgentState(
         UserInputRequestRecord pendingUserInput,
         List<RuntimeFailure> runtimeFailures,
         List<String> recoveryNotes,
+        MemoryContext memoryContext,
         Map<String, Object> transientData) {
     public Object transientValue(String key) {
         return transientData.get(key);
