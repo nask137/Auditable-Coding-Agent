@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --background: 220 18% 8%;
+  --foreground: 210 18% 92%;
+  --card: 220 16% 11%;
+  --card-foreground: 210 18% 92%;
+  --primary: 166 72% 42%;
+  --primary-foreground: 175 100% 8%;
+  --secondary: 218 14% 18%;
+  --secondary-foreground: 210 18% 92%;
+  --muted: 218 14% 15%;
+  --muted-foreground: 213 11% 64%;
+  --accent: 38 88% 54%;
+  --accent-foreground: 30 100% 8%;
+  --destructive: 3 72% 56%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 218 14% 22%;
+  --input: 218 14% 20%;
+  --ring: 166 72% 42%;
+  --radius: 0.45rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(120deg, rgba(18, 118, 109, 0.16), transparent 26%),
+    linear-gradient(180deg, hsl(220 18% 7%), hsl(220 18% 9%));
+  color: hsl(var(--foreground));
+  font-family:
+    "IBM Plex Sans",
+    "Aptos",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+}
+
+code,
+pre,
+.mono {
+  font-family: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.35);
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}

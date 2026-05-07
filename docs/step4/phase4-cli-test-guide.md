@@ -14,7 +14,7 @@ mvn spring-boot:run
 
 ```powershell
 mvn -q -DskipTests package
-mvn -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
+mvn -q dependency:build-classpath "-Dmdep.outputFile=target/classpath.txt"
 $cp = "target/classes;" + (Get-Content target/classpath.txt)
 ```
 
