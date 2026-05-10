@@ -152,7 +152,9 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 "List workspace files for planning", Domain.RiskLevel.LOW);
         var result = fileToolService.listFiles(new ToolExecutionContext(state.task().id(), state.run().id(), step.id(),
                 action.id(), state.workspace()), ".", 4);
-        return completeToolStep(state, step.id(), result, Map.of("stepId", step.id().toString()));
+        return completeToolStep(state, step.id(), result, Map.of(
+                "stepId", step.id().toString(),
+                "observedFiles", list(result.payload().get("files"))));
     }
 
     private NodeExecutionResult projectScan(AgentState state) {

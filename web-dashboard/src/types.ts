@@ -198,3 +198,21 @@ export type CommandPolicy = Record<string, any> & {
   policyType: string;
   riskLevel: string;
 };
+
+export type CliRuntimeSettings = {
+  baseUrl: string;
+  workspaceId: string;
+  workflow: string;
+  permissionPreset: string;
+  model: string;
+  profile: string;
+};
+
+export type CliSessionSummary = {
+  sessionId: string;
+  workspaceId?: string;
+  runId?: string;
+  taskId?: string;
+  status?: string;
+  updatedAt?: string;
+};

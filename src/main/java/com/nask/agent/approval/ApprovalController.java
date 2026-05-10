@@ -1,6 +1,8 @@
 package com.nask.agent.approval;
 
 import com.nask.agent.run.AgentLoopExecutor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,6 +20,8 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/approvals")
 public class ApprovalController {
+    private static final Logger log = LoggerFactory.getLogger(ApprovalController.class);
+
     private final ApprovalService approvalService;
     private final AgentLoopExecutor loopExecutor;
 
@@ -53,7 +57,12 @@ public class ApprovalController {
         var approval = approvalService.approve(approvalId, request);
         // Approval resolution only changes domain state. The controller kicks the
         // synchronous Phase 1 loop so the user sees progress immediately.
-        loopExecutor.execute(approval.runId());
+        try {
+            loopExecutor.execute(approval.runId());
+        } catch (RuntimeException e) {
+            log.warn("Approval {} was resolved, but run {} did not resume cleanly",
+                    approvalId, approval.runId(), e);
+        }
         return approvalService.getRequired(approvalId);
     }
 

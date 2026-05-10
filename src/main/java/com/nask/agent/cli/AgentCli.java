@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ import java.util.concurrent.Callable;
         mixinStandardHelpOptions = true,
         subcommands = {
                 AgentCli.WorkspaceCommand.class,
+                AgentCli.TuiCommand.class,
                 AgentCli.RunCommand.class,
                 AgentCli.StatusCommand.class,
                 AgentCli.EventsCommand.class,
@@ -53,11 +55,15 @@ import java.util.concurrent.Callable;
                 AgentCli.CommandPolicyCommand.class
         })
 public class AgentCli implements Callable<Integer> {
-    @CommandLine.Option(names = "--base-url", defaultValue = "http://localhost:8080", description = "Agent service base URL")
+    @CommandLine.Option(names = "--base-url", description = "Agent service base URL")
     String baseUrl;
+    @CommandLine.Option(names = "--json", description = "Print raw JSON for wrapper commands")
+    boolean rawJson;
+    @CommandLine.Parameters(arity = "0..*", description = "Initial prompt for interactive mode")
+    List<String> initialPrompt = new ArrayList<>();
 
     private final HttpClient client = HttpClient.newHttpClient();
-    private final ObjectMapper mapper = new ObjectMapper();
+    final ObjectMapper mapper = new ObjectMapper();
 
     /**
      * Runs the CLI entry point.
@@ -70,8 +76,8 @@ public class AgentCli implements Callable<Integer> {
      * Shows top-level usage when no subcommand is provided.
      */
     @Override
-    public Integer call() {
-        CommandLine.usage(this, System.out);
+    public Integer call() throws Exception {
+        new InteractiveTerminalSession(this, rawJson).run(String.join(" ", initialPrompt));
         return 0;
     }
 
@@ -79,8 +85,9 @@ public class AgentCli implements Callable<Integer> {
      * Sends a GET request to the configured service.
      */
     String get(String path) throws Exception {
-        var response = client.send(HttpRequest.newBuilder(URI.create(baseUrl + path)).GET().build(),
+        var response = client.send(HttpRequest.newBuilder(URI.create(effectiveBaseUrl() + path)).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
+        requireSuccess(response);
         return response.body();
     }
 
@@ -89,11 +96,12 @@ public class AgentCli implements Callable<Integer> {
      */
     String post(String path, Object body) throws Exception {
         var json = body == null ? "" : mapper.writeValueAsString(body);
-        var response = client.send(HttpRequest.newBuilder(URI.create(baseUrl + path))
+        var response = client.send(HttpRequest.newBuilder(URI.create(effectiveBaseUrl() + path))
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(json))
                         .build(),
                 HttpResponse.BodyHandlers.ofString());
+        requireSuccess(response);
         return response.body();
     }
 
@@ -101,9 +109,43 @@ public class AgentCli implements Callable<Integer> {
      * Sends a DELETE request to the configured service.
      */
     String delete(String path) throws Exception {
-        var response = client.send(HttpRequest.newBuilder(URI.create(baseUrl + path)).DELETE().build(),
+        var response = client.send(HttpRequest.newBuilder(URI.create(effectiveBaseUrl() + path)).DELETE().build(),
                 HttpResponse.BodyHandlers.ofString());
+        requireSuccess(response);
         return response.body();
+    }
+
+    String effectiveBaseUrl() {
+        if (baseUrl != null && !baseUrl.isBlank()) {
+            return baseUrl.replaceAll("/$", "");
+        }
+        return CliLocalConfig.load().get("base_url").replaceAll("/$", "");
+    }
+
+    String format(String body) throws Exception {
+        return new CliOutputFormatter(mapper, rawJson).json(body);
+    }
+
+    private void requireSuccess(HttpResponse<String> response) {
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("HTTP " + response.statusCode() + ": " + response.body());
+        }
+    }
+
+    /**
+     * Starts the interactive terminal session explicitly.
+     */
+    @CommandLine.Command(name = "tui")
+    static class TuiCommand implements Callable<Integer> {
+        @CommandLine.Spec CommandLine.Model.CommandSpec spec;
+        @CommandLine.Parameters(arity = "0..*", description = "Initial prompt") List<String> prompt = List.of();
+
+        @Override
+        public Integer call() throws Exception {
+            var root = (AgentCli) spec.root().userObject();
+            new InteractiveTerminalSession(root, root.rawJson).run(String.join(" ", prompt));
+            return 0;
+        }
     }
 
     /**
@@ -136,7 +178,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/workspaces", Map.of("rootPath", path, "trusted", true)));
+            System.out.println(root.format(root.post("/api/workspaces", Map.of("rootPath", path, "trusted", true))));
             return 0;
         }
     }
@@ -154,7 +196,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces"));
+            System.out.println(root.format(root.get("/api/workspaces")));
             return 0;
         }
     }
@@ -177,7 +219,7 @@ public class AgentCli implements Callable<Integer> {
             var root = (AgentCli) spec.root().userObject();
             var created = root.post("/api/tasks", Map.of("workspaceId", workspaceId, "title", "CLI task", "userRequest", task));
             var id = root.mapper.readTree(created).get("id").asText();
-            System.out.println(root.post("/api/tasks/" + id + "/start?workflow=" + workflow, null));
+            System.out.println(root.format(root.post("/api/tasks/" + id + "/start?workflow=" + workflow, null)));
             return 0;
         }
     }
@@ -192,7 +234,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workflows"));
+            System.out.println(root.format(root.get("/api/workflows")));
             return 0;
         }
     }
@@ -208,7 +250,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workflows/" + workflowId));
+            System.out.println(root.format(root.get("/api/workflows/" + workflowId)));
             return 0;
         }
     }
@@ -224,7 +266,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/runs/" + runId + "/workflow"));
+            System.out.println(root.format(root.get("/api/runs/" + runId + "/workflow")));
             return 0;
         }
     }
@@ -240,8 +282,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/runs/" + runId + "/workflow/nodes"));
-            System.out.println(root.get("/api/runs/" + runId + "/workflow/edges"));
+            System.out.println(root.format(root.get("/api/runs/" + runId + "/workflow/nodes")));
+            System.out.println(root.format(root.get("/api/runs/" + runId + "/workflow/edges")));
             return 0;
         }
     }
@@ -257,7 +299,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/workspaces/" + workspaceId + "/scan", null));
+            System.out.println(root.format(root.post("/api/workspaces/" + workspaceId + "/scan", null)));
             return 0;
         }
     }
@@ -273,7 +315,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/profile"));
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/profile")));
             return 0;
         }
     }
@@ -291,8 +333,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/symbols?query="
-                    + encode(query) + "&type=" + encode(type)));
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/symbols?query="
+                    + encode(query) + "&type=" + encode(type))));
             return 0;
         }
     }
@@ -309,7 +351,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/outline?path=" + encode(path)));
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/outline?path=" + encode(path))));
             return 0;
         }
     }
@@ -330,10 +372,10 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/search-context?q="
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/search-context?q="
                     + encode(query) + optional("memoryType", memoryType)
                     + optional("documentType", documentType) + optional("symbolType", symbolType)
-                    + "&limit=" + limit));
+                    + "&limit=" + limit)));
             return 0;
         }
     }
@@ -349,7 +391,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/memory"));
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/memory")));
             return 0;
         }
     }
@@ -384,7 +426,7 @@ public class AgentCli implements Callable<Integer> {
                 body.put("sourcePath", sourcePath);
                 body.put("sourceType", "USER");
             }
-            System.out.println(root.post("/api/workspaces/" + workspaceId + "/memory", body));
+            System.out.println(root.format(root.post("/api/workspaces/" + workspaceId + "/memory", body)));
             return 0;
         }
     }
@@ -400,7 +442,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/memory-proposals"));
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/memory-proposals")));
             return 0;
         }
     }
@@ -416,8 +458,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/memory-proposals/" + proposalId + "/approve",
-                    Map.of("resolvedBy", "cli")));
+            System.out.println(root.format(root.post("/api/memory-proposals/" + proposalId + "/approve",
+                    Map.of("resolvedBy", "cli"))));
             return 0;
         }
     }
@@ -434,8 +476,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/memory-proposals/" + proposalId + "/reject",
-                    Map.of("resolvedBy", "cli", "reason", reason)));
+            System.out.println(root.format(root.post("/api/memory-proposals/" + proposalId + "/reject",
+                    Map.of("resolvedBy", "cli", "reason", reason))));
             return 0;
         }
     }
@@ -451,7 +493,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/memory-retrievals"));
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/memory-retrievals")));
             return 0;
         }
     }
@@ -470,7 +512,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/tasks/" + taskId));
+            System.out.println(root.format(root.get("/api/tasks/" + taskId)));
             return 0;
         }
     }
@@ -489,7 +531,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/tasks/" + taskId + "/events"));
+            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/events")));
             return 0;
         }
     }
@@ -505,7 +547,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/tasks/" + taskId + "/failures"));
+            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/failures")));
             return 0;
         }
     }
@@ -524,7 +566,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/tasks/" + taskId + "/changes"));
+            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/changes")));
             return 0;
         }
     }
@@ -543,7 +585,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/tasks/" + taskId + "/report"));
+            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/report")));
             return 0;
         }
     }
@@ -561,7 +603,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/approvals?status=PENDING"));
+            System.out.println(root.format(root.get("/api/approvals?status=PENDING")));
             return 0;
         }
     }
@@ -580,7 +622,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "cli")));
+            System.out.println(root.format(root.post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "cli"))));
             return 0;
         }
     }
@@ -599,7 +641,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "cli", "reason", "Denied from CLI")));
+            System.out.println(root.format(root.post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "cli", "reason", "Denied from CLI"))));
             return 0;
         }
     }
@@ -614,7 +656,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/user-input-requests?status=PENDING"));
+            System.out.println(root.format(root.get("/api/user-input-requests?status=PENDING")));
             return 0;
         }
     }
@@ -630,7 +672,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/user-input-requests/" + requestId));
+            System.out.println(root.format(root.get("/api/user-input-requests/" + requestId)));
             return 0;
         }
     }
@@ -647,7 +689,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/user-input-requests/" + requestId + "/answer", Map.of("answer", answer)));
+            System.out.println(root.format(root.post("/api/user-input-requests/" + requestId + "/answer", Map.of("answer", answer))));
             return 0;
         }
     }
@@ -663,7 +705,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.post("/api/user-input-requests/" + requestId + "/cancel", null));
+            System.out.println(root.format(root.post("/api/user-input-requests/" + requestId + "/cancel", null)));
             return 0;
         }
     }
@@ -700,8 +742,8 @@ public class AgentCli implements Callable<Integer> {
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
             var cleanArgs = args.stream().filter(value -> !value.isBlank()).toList();
-            System.out.println(root.post("/api/workspaces/" + workspaceId + "/command-policies",
-                    Map.of("policyType", "ALLOWLIST", "executable", executable, "argsPattern", cleanArgs)));
+            System.out.println(root.format(root.post("/api/workspaces/" + workspaceId + "/command-policies",
+                    Map.of("policyType", "ALLOWLIST", "executable", executable, "argsPattern", cleanArgs))));
             return 0;
         }
     }
@@ -720,7 +762,7 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.get("/api/workspaces/" + workspaceId + "/command-policies"));
+            System.out.println(root.format(root.get("/api/workspaces/" + workspaceId + "/command-policies")));
             return 0;
         }
     }
