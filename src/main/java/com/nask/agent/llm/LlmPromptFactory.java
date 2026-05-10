@@ -64,26 +64,66 @@ public class LlmPromptFactory {
 
     public LlmPrompt agentDecision(ExecutionContext context) {
         return new LlmPrompt("agent-decision-v1", SHARED_SYSTEM, """
-                Return json with this exact shape:
+                Return one JSON object with this exact top-level shape:
                 {
                   "planItemId": "%s",
                   "actions": [
                     {
-                      "type": "LIST_FILES|READ_FILE|SEARCH_TEXT|CREATE_FILE|APPLY_PATCH|GIT_STATUS|GIT_DIFF",
+                      "type": "CREATE_FILE",
                       "reason": "why this tool intent is needed",
-                      "input": {}
+                      "input": {
+                        "path": "relative/path",
+                        "content": "complete file content when type is CREATE_FILE"
+                      }
                     }
                   ]
                 }
-                Allowed input shapes:
+
+                The action type must be exactly one of:
+                LIST_FILES, READ_FILE, SEARCH_TEXT, CREATE_DIRECTORY, CREATE_FILE, APPLY_PATCH, GIT_STATUS, GIT_DIFF.
+
+                Required input object by action type:
                 LIST_FILES: {"path": ".", "maxDepth": 4}
                 READ_FILE: {"path": "relative/path"}
                 SEARCH_TEXT: {"query": "text"}
+                CREATE_DIRECTORY: {"path": "relative/path"}
                 CREATE_FILE: {"path": "relative/path", "content": "full file content"}
                 APPLY_PATCH: {"path": "relative/path", "oldText": "exact existing text", "newText": "replacement text, may be empty"}
                 GIT_STATUS: {"workingDirectory": "."}
                 GIT_DIFF: {"workingDirectory": "."}
+
+                Example JSON output for creating directories:
+                {
+                  "planItemId": "%s",
+                  "actions": [
+                    {
+                      "type": "CREATE_DIRECTORY",
+                      "reason": "Create the Maven source directory",
+                      "input": {
+                        "path": "src/main/java"
+                      }
+                    }
+                  ]
+                }
+
+                Example JSON output for creating a file:
+                {
+                  "planItemId": "%s",
+                  "actions": [
+                    {
+                      "type": "CREATE_FILE",
+                      "reason": "Create a minimal Maven pom.xml",
+                      "input": {
+                        "path": "pom.xml",
+                        "content": "<project xmlns=\\"http://maven.apache.org/POM/4.0.0\\">\\n  <modelVersion>4.0.0</modelVersion>\\n</project>\\n"
+                      }
+                    }
+                  ]
+                }
+
                 Return an empty actions array if no action is needed. The Runtime will reject unsupported types.
+                Do not use CREATE_FILE to create directories. Use CREATE_DIRECTORY for directory paths.
+                Every CREATE_FILE action must include a non-empty content string.
                 Use READ_FILE before APPLY_PATCH unless recent tool results already include the exact target content.
 
                 Current plan item:
@@ -100,8 +140,9 @@ public class LlmPromptFactory {
 
                 Project memory context:
                 %s
-                """.formatted(context.currentItem().id(), context.currentItem(), context.observedFiles(),
-                context.recentToolResults(), context.recoveryNotes(), memorySummary(context.memoryContext())));
+                """.formatted(context.currentItem().id(), context.currentItem().id(), context.currentItem().id(),
+                context.currentItem(), context.observedFiles(), context.recentToolResults(), context.recoveryNotes(),
+                memorySummary(context.memoryContext())));
     }
 
     public LlmPrompt replan(ExecutionContext context, String failureSummary) {

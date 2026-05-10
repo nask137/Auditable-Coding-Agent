@@ -549,6 +549,7 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
                 yield fileToolService.createFile(context, string(input, "path", "AGENT_TASK_NOTE.md"),
                         string(input, "content", ""), reason);
             }
+            case "CREATE_DIRECTORY" -> fileToolService.createDirectory(context, string(input, "path", "."), reason);
             case "APPLY_PATCH" -> {
                 var beforeCount = fileChangeRepository.countByRun(context.runId());
                 if (beforeCount >= settings.maxFileChanges()) {

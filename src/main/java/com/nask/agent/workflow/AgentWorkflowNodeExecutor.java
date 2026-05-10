@@ -406,6 +406,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 yield fileToolService.createFile(context, string(input.get("path"), "AGENT_TASK_NOTE.md"),
                         string(input.get("content"), ""), reason);
             }
+            case "CREATE_DIRECTORY" -> fileToolService.createDirectory(context, string(input.get("path"), "."), reason);
             case "APPLY_PATCH" -> {
                 if (fileChangeRepository.countByRun(context.runId()) >= settings.maxFileChanges()) {
                     yield ToolExecutionResult.blocked("Maximum file change count exceeded");

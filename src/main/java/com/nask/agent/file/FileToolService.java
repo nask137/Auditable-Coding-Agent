@@ -190,6 +190,39 @@ public class FileToolService {
     }
 
     /**
+     * Creates a directory tree inside the workspace.
+     */
+    public ToolExecutionResult createDirectory(ToolExecutionContext context, String path, String reason) {
+        var input = Map.<String, Object>of("path", path, "reason", reason);
+        var call = startTool(context, "create_directory", Domain.PermissionLevel.WORKSPACE_WRITE,
+                "Create directory", input);
+        try {
+            var check = pathGuard.check(context.workspace(), path, true);
+            var decision = permissionService.fileDecision(check, Domain.FileOperation.FILE_CREATE, false, 0);
+            var permission = handlePermission(context, call.id(), decision, List.of(check.relativePath()), null, null, null);
+            if (permission != null) {
+                return permission;
+            }
+            var existed = Files.isDirectory(check.absolutePath(), LinkOption.NOFOLLOW_LINKS);
+            Files.createDirectories(check.absolutePath());
+            auditService.append(new AuditEventDraft(context.taskId(), context.runId(), context.stepId(), context.actionId(),
+                    Domain.AuditEventType.FileCreated, Domain.AuditActor.TOOL, Domain.AuditLevel.INFO,
+                    "Create directory " + check.relativePath(), reason, List.of(check.relativePath()), call.id(),
+                    null, null, null, Domain.PermissionLevel.WORKSPACE_WRITE, decision.riskLevel(), null,
+                    true, null, null, Map.of("directory", true, "changed", !existed)));
+            completeTool(call.id(), true, (existed ? "Directory already exists: " : "Created directory ")
+                    + check.relativePath(), Map.of("path", check.relativePath(), "changed", !existed,
+                    "directory", true), null);
+            return ToolExecutionResult.success((existed ? "Directory already exists: " : "Created directory ")
+                    + check.relativePath(), Map.of("changed", !existed, "path", check.relativePath(),
+                    "directory", true));
+        } catch (Exception e) {
+            failTool(call.id(), e.getMessage());
+            return ToolExecutionResult.blocked(e.getMessage());
+        }
+    }
+
+    /**
      * Replaces one exact text fragment in a file and records the mutation.
      */
     public ToolExecutionResult applyPatch(ToolExecutionContext context, String path, String oldText, String newText, String reason) {
