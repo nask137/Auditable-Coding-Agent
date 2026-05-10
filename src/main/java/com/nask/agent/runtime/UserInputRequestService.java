@@ -65,6 +65,9 @@ public class UserInputRequestService {
     public UserInputRequestRecord answer(UUID id, AnswerUserInputRequest request) {
         var current = getRequired(id);
         requirePending(current);
+        if (isCancelTask(request.answer())) {
+            return cancel(id);
+        }
         repository.answer(id, request.answer());
         auditService.append(new AuditEventDraft(current.taskId(), current.runId(), current.stepId(), null,
                 Domain.AuditEventType.UserInputProvided, Domain.AuditActor.USER, Domain.AuditLevel.INFO,
@@ -105,5 +108,9 @@ public class UserInputRequestService {
             throw new ApiException(HttpStatus.CONFLICT, "USER_INPUT_NOT_PENDING",
                     "User input request is not pending: " + request.id());
         }
+    }
+
+    private boolean isCancelTask(String answer) {
+        return answer != null && "cancel task".equalsIgnoreCase(answer.strip());
     }
 }

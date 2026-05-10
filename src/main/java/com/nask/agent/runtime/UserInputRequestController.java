@@ -40,7 +40,9 @@ public class UserInputRequestController {
     @PostMapping("/{requestId}/answer")
     UserInputRequestRecord answer(@PathVariable UUID requestId, @Valid @RequestBody AnswerUserInputRequest request) {
         var answered = service.answer(requestId, request);
-        loopExecutor.execute(answered.runId());
+        if ("ANSWERED".equals(answered.status())) {
+            loopExecutor.execute(answered.runId());
+        }
         return service.getRequired(requestId);
     }
 

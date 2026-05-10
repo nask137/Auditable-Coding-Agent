@@ -2,6 +2,10 @@ package com.nask.agent.llm;
 
 import org.junit.jupiter.api.Test;
 
+import com.nask.agent.common.Domain;
+import com.nask.agent.plan.PlanItem;
+
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,5 +29,25 @@ class LlmPromptFactoryTests {
         assertThat(taskPrompt.user()).contains(note);
         assertThat(planPrompt.user()).contains(note);
         assertThat(validationPrompt.user()).contains(note);
+    }
+
+    @Test
+    void agentDecisionPromptUsesConcreteJsonExamplesForFileAndDirectoryActions() {
+        var planItem = new PlanItem(UUID.randomUUID(), UUID.randomUUID(),
+                "Create standard Maven directory layout", Domain.PlanItemStatus.PENDING.name(),
+                List.of("src/main/java", "pom.xml"), "notes", 1, Instant.now(), Instant.now());
+
+        var prompt = prompts.agentDecision(new ExecutionContext(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), planItem, List.of()));
+
+        assertThat(prompt.user())
+                .contains("Example JSON output for creating directories")
+                .contains("\"type\": \"CREATE_DIRECTORY\"")
+                .contains("\"path\": \"src/main/java\"")
+                .contains("Example JSON output for creating a file")
+                .contains("\"type\": \"CREATE_FILE\"")
+                .contains("\"content\":")
+                .contains("Every CREATE_FILE action must include a non-empty content string")
+                .contains("Do not use CREATE_FILE to create directories");
     }
 }

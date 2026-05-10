@@ -13,6 +13,7 @@ import java.util.UUID;
  */
 class InteractiveTerminalSession {
     private static final java.util.Set<String> TERMINAL = java.util.Set.of("COMPLETED", "FAILED", "CANCELLED");
+    private static final String CUSTOM_USER_INPUT_OPTION = "None of these; answer manually";
 
     private final AgentCli cli;
     private final ObjectMapper mapper;
@@ -189,17 +190,138 @@ class InteractiveTerminalSession {
             return;
         }
         System.out.println(request.path("question").asText("Runtime needs guidance."));
+        var answer = chooseUserInputAnswer(request);
+        if ("cancel task".equalsIgnoreCase(answer.strip())) {
+            cli.post("/api/user-input-requests/" + request.path("id").asText() + "/cancel", null);
+        } else {
+            cli.post("/api/user-input-requests/" + request.path("id").asText() + "/answer",
+                    Map.of("answer", answer));
+        }
+        pollUntilBlockedOrDone();
+    }
+
+    private String chooseUserInputAnswer(JsonNode request) throws Exception {
+        var choices = new java.util.ArrayList<String>();
         var options = request.path("suggestedOptions");
         if (options.isArray()) {
             for (var option : options) {
-                System.out.println("- " + option.asText());
+                var text = option.asText();
+                if (!text.isBlank()) {
+                    choices.add(text);
+                }
             }
         }
-        System.out.print("Answer: ");
-        var answer = scanner.nextLine();
-        cli.post("/api/user-input-requests/" + request.path("id").asText() + "/answer",
-                Map.of("answer", answer));
-        pollUntilBlockedOrDone();
+        if (choices.isEmpty()) {
+            System.out.print("Answer: ");
+            return scanner.nextLine();
+        }
+        choices.add(CUSTOM_USER_INPUT_OPTION);
+        var selected = selectChoice(choices);
+        if (selected == choices.size() - 1) {
+            System.out.print("Custom answer: ");
+            return scanner.nextLine();
+        }
+        return choices.get(selected);
+    }
+
+    private int selectChoice(java.util.List<String> choices) throws Exception {
+        var selected = 0;
+        System.out.println("Use ↑/↓ then Enter, or type a number.");
+        renderChoiceMenu(choices, selected, false);
+        while (true) {
+            var key = readMenuKey();
+            if (key.kind() == MenuKeyKind.UP) {
+                selected = selected == 0 ? choices.size() - 1 : selected - 1;
+                renderChoiceMenu(choices, selected, true);
+            } else if (key.kind() == MenuKeyKind.DOWN) {
+                selected = (selected + 1) % choices.size();
+                renderChoiceMenu(choices, selected, true);
+            } else if (key.kind() == MenuKeyKind.ENTER) {
+                System.out.println();
+                return selected;
+            } else if (key.kind() == MenuKeyKind.NUMBER && key.number() >= 1 && key.number() <= choices.size()) {
+                System.out.println();
+                return key.number() - 1;
+            }
+        }
+    }
+
+    private void renderChoiceMenu(java.util.List<String> choices, int selected, boolean redraw) {
+        if (redraw) {
+            System.out.print("\033[" + (choices.size() + 1) + "F");
+        }
+        for (var i = 0; i < choices.size(); i++) {
+            var marker = i == selected ? ">" : " ";
+            System.out.print("\033[2K");
+            System.out.println("%s %d. %s".formatted(marker, i + 1, choices.get(i)));
+        }
+        System.out.print("\033[2K");
+        System.out.print("Choice: ");
+    }
+
+    private MenuKey readMenuKey() throws Exception {
+        var first = System.in.read();
+        if (first == -1 || first == '\n' || first == '\r') {
+            consumeLfAfterCr(first);
+            return MenuKey.enter();
+        }
+        if (first >= '1' && first <= '9') {
+            discardUntilLineEnd();
+            return MenuKey.number(first - '0');
+        }
+        if (first == 27) {
+            var second = System.in.read();
+            var third = System.in.read();
+            if (second == '[' && third == 'A') {
+                return MenuKey.up();
+            }
+            if (second == '[' && third == 'B') {
+                return MenuKey.down();
+            }
+        }
+        discardUntilLineEnd();
+        return MenuKey.unknown();
+    }
+
+    private void consumeLfAfterCr(int first) throws Exception {
+        if (first == '\r' && System.in.available() > 0) {
+            System.in.read();
+        }
+    }
+
+    private void discardUntilLineEnd() throws Exception {
+        while (System.in.available() > 0) {
+            var value = System.in.read();
+            if (value == '\n' || value == '\r') {
+                return;
+            }
+        }
+    }
+
+    private enum MenuKeyKind {
+        UP, DOWN, ENTER, NUMBER, UNKNOWN
+    }
+
+    private record MenuKey(MenuKeyKind kind, int number) {
+        static MenuKey up() {
+            return new MenuKey(MenuKeyKind.UP, 0);
+        }
+
+        static MenuKey down() {
+            return new MenuKey(MenuKeyKind.DOWN, 0);
+        }
+
+        static MenuKey enter() {
+            return new MenuKey(MenuKeyKind.ENTER, 0);
+        }
+
+        static MenuKey number(int number) {
+            return new MenuKey(MenuKeyKind.NUMBER, number);
+        }
+
+        static MenuKey unknown() {
+            return new MenuKey(MenuKeyKind.UNKNOWN, 0);
+        }
     }
 
     private void renderFinal(JsonNode timeline) {

@@ -13,8 +13,8 @@ import java.util.Set;
  */
 @Component
 public class StructuredLlmOutputValidator {
-    private static final Set<String> ACTION_TYPES = Set.of("LIST_FILES", "READ_FILE", "SEARCH_TEXT", "CREATE_FILE",
-            "APPLY_PATCH", "GIT_STATUS", "GIT_DIFF");
+    private static final Set<String> ACTION_TYPES = Set.of("LIST_FILES", "READ_FILE", "SEARCH_TEXT",
+            "CREATE_DIRECTORY", "CREATE_FILE", "APPLY_PATCH", "GIT_STATUS", "GIT_DIFF");
 
     private final Validator validator;
 
@@ -69,6 +69,7 @@ public class StructuredLlmOutputValidator {
             }
             case "READ_FILE" -> requireString(input, "path");
             case "SEARCH_TEXT" -> requireString(input, "query");
+            case "CREATE_DIRECTORY" -> requireString(input, "path");
             case "CREATE_FILE" -> {
                 requireString(input, "path");
                 requireString(input, "content");
