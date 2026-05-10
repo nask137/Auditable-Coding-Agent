@@ -24,16 +24,18 @@ public class RunController {
     private final PlanService planService;
     private final AgentStepService stepService;
     private final RuntimeFailureService runtimeFailureService;
+    private final RunTimelineService timelineService;
 
     /**
      * Creates a run observation controller.
      */
     public RunController(AgentRunService runService, PlanService planService, AgentStepService stepService,
-                         RuntimeFailureService runtimeFailureService) {
+                         RuntimeFailureService runtimeFailureService, RunTimelineService timelineService) {
         this.runService = runService;
         this.planService = planService;
         this.stepService = stepService;
         this.runtimeFailureService = runtimeFailureService;
+        this.timelineService = timelineService;
     }
 
     /**
@@ -66,5 +68,13 @@ public class RunController {
     @GetMapping("/{runId}/failures")
     List<RuntimeFailure> failures(@PathVariable UUID runId) {
         return runtimeFailureService.findByRun(runId);
+    }
+
+    /**
+     * Returns the full run timeline for polling TUI and dashboard clients.
+     */
+    @GetMapping("/{runId}/timeline")
+    RunTimeline timeline(@PathVariable UUID runId) {
+        return timelineService.get(runId);
     }
 }

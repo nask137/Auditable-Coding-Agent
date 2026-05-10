@@ -4,6 +4,8 @@ import type {
   ApprovalRequest,
   AuditEvent,
   CodeSymbol,
+  CliRuntimeSettings,
+  CliSessionSummary,
   CodingTask,
   CommandPolicy,
   FileChange,
@@ -99,5 +101,8 @@ export const api = {
   commandPolicies: (workspaceId: string) => request<CommandPolicy[]>(`/api/workspaces/${workspaceId}/command-policies`),
   createCommandPolicy: (workspaceId: string, body: Record<string, any>) =>
     request<CommandPolicy>(`/api/workspaces/${workspaceId}/command-policies`, { method: "POST", body }),
-  deleteCommandPolicy: (id: string) => request<void>(`/api/command-policies/${id}`, { method: "DELETE" })
+  deleteCommandPolicy: (id: string) => request<void>(`/api/command-policies/${id}`, { method: "DELETE" }),
+  cliSettings: () => request<CliRuntimeSettings>("/api/cli/settings"),
+  saveCliSettings: (body: CliRuntimeSettings) => request<CliRuntimeSettings>("/api/cli/settings", { method: "POST", body }),
+  cliSessions: () => request<CliSessionSummary[]>("/api/cli/sessions")
 };

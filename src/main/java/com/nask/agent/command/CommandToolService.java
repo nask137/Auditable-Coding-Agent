@@ -12,11 +12,16 @@ import com.nask.agent.workspace.WorkspacePathGuard;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
+import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -222,7 +227,7 @@ public class CommandToolService {
     private ProcessResult executeProcess(String executable, List<String> arguments, Path cwd) {
         try {
             var command = new ArrayList<String>();
-            command.add(executable);
+            command.add(resolveExecutableForProcess(executable, System.getenv(), isWindows()));
             command.addAll(arguments);
             var process = new ProcessBuilder(command)
                     .directory(cwd.toFile())
@@ -242,6 +247,85 @@ public class CommandToolService {
         } catch (Exception e) {
             return new ProcessResult(1, e.getMessage());
         }
+    }
+
+    /**
+     * Resolves extension-less Windows commands through PATH/PATHEXT before
+     * passing them to ProcessBuilder, which does not invoke shell lookup.
+     */
+    static String resolveExecutableForProcess(String executable, Map<String, String> environment, boolean windows) {
+        if (!windows || executable == null || executable.isBlank()) {
+            return executable;
+        }
+        var env = caseInsensitive(environment);
+        var pathDirs = pathDirs(env.get("PATH"));
+        var extensions = pathExtensions(env.get("PATHEXT"));
+        var hasPath = executable.contains("\\") || executable.contains("/") || Path.of(executable).isAbsolute();
+        if (hasPath) {
+            var resolved = resolveCandidate(Path.of(executable), extensions);
+            return resolved == null ? executable : resolved.toString();
+        }
+        for (var dir : pathDirs) {
+            var resolved = resolveCandidate(dir.resolve(executable), extensions);
+            if (resolved != null) {
+                return resolved.toString();
+            }
+        }
+        return executable;
+    }
+
+    private static Path resolveCandidate(Path base, List<String> extensions) {
+        if (hasExtension(base)) {
+            return Files.isRegularFile(base) ? base : null;
+        }
+        for (var extension : extensions) {
+            var candidate = Path.of(base.toString() + extension);
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasExtension(Path path) {
+        var fileName = path.getFileName();
+        if (fileName == null) {
+            return false;
+        }
+        var name = fileName.toString();
+        var index = name.lastIndexOf('.');
+        return index > 0 && index < name.length() - 1;
+    }
+
+    private static List<Path> pathDirs(String path) {
+        if (path == null || path.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(path.split(java.util.regex.Pattern.quote(File.pathSeparator)))
+                .filter(value -> !value.isBlank())
+                .map(Path::of)
+                .toList();
+    }
+
+    private static List<String> pathExtensions(String pathext) {
+        var value = pathext == null || pathext.isBlank() ? ".COM;.EXE;.BAT;.CMD" : pathext;
+        return Arrays.stream(value.split(";"))
+                .map(String::trim)
+                .filter(extension -> !extension.isBlank())
+                .map(extension -> extension.startsWith(".") ? extension : "." + extension)
+                .toList();
+    }
+
+    private static Map<String, String> caseInsensitive(Map<String, String> environment) {
+        var values = new LinkedHashMap<String, String>();
+        if (environment != null) {
+            environment.forEach((key, value) -> values.put(key.toUpperCase(Locale.ROOT), value));
+        }
+        return values;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     /**

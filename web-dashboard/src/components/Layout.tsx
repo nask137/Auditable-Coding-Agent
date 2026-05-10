@@ -7,6 +7,7 @@ import {
   GitBranch,
   Home,
   MessageSquare,
+  Monitor,
   RotateCcw,
   Settings,
   ShieldCheck,
@@ -24,6 +25,7 @@ const nav = [
   { to: "/inputs", label: "用户输入", icon: MessageSquare },
   { to: "/memory", label: "记忆", icon: Brain },
   { to: "/context", label: "上下文", icon: GitBranch },
+  { to: "/cli-sessions", label: "CLI 会话", icon: Monitor },
   { to: "/settings", label: "设置", icon: Settings }
 ];
 

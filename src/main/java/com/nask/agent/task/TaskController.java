@@ -24,16 +24,18 @@ public class TaskController {
     private final TaskService taskService;
     private final AgentRunService runService;
     private final AgentLoopExecutor loopExecutor;
+    private final com.nask.agent.run.AgentRunAsyncExecutor asyncExecutor;
     private final WorkflowService workflowService;
 
     /**
      * Creates a task controller with task and run orchestration services.
      */
     public TaskController(TaskService taskService, AgentRunService runService, AgentLoopExecutor loopExecutor,
-                          WorkflowService workflowService) {
+                          com.nask.agent.run.AgentRunAsyncExecutor asyncExecutor, WorkflowService workflowService) {
         this.taskService = taskService;
         this.runService = runService;
         this.loopExecutor = loopExecutor;
+        this.asyncExecutor = asyncExecutor;
         this.workflowService = workflowService;
     }
 
@@ -66,6 +68,19 @@ public class TaskController {
         // state or a WAITING_APPROVAL pause without a background worker.
         loopExecutor.execute(run.id());
         return runService.getRequired(run.id());
+    }
+
+    /**
+     * Starts a run on a background worker for interactive polling clients.
+     */
+    @PostMapping("/{taskId}/start-async")
+    AgentRun startAsync(@PathVariable UUID taskId,
+                        @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
+        var task = taskService.getRequired(taskId);
+        var workflowDefinition = workflowService.requireEnabledByName(workflow);
+        var run = runService.createRun(task, workflowDefinition.name());
+        asyncExecutor.submit(task.id(), run.id());
+        return run;
     }
 
     /**

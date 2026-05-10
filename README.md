@@ -171,7 +171,7 @@ agent.project-scan.max-total-bytes=10485760
 
 ## CLI 使用
 
-CLI 位于 `com.nask.agent.cli.AgentCli`。先编译并生成运行 classpath：
+CLI 位于 `com.nask.agent.cli.AgentCli`。默认运行 `agent` 会进入 Codex 风格的交互式终端会话；原有 REST 包装命令仍保留为显式子命令。先编译并生成运行 classpath：
 
 ```powershell
 mvn -q "-DskipTests" package
@@ -191,9 +191,56 @@ function agent {
 
 ```powershell
 agent --help
+agent tui --help
 agent workspace --help
 agent command --help
 ```
+
+### 交互式 TUI
+
+启动交互会话：
+
+```powershell
+agent
+```
+
+也可以直接带首条提示：
+
+```powershell
+agent "review this project and explain the risky files"
+agent tui "create an audited note and validate"
+```
+
+首次提交任务时，TUI 会把启动 `agent` 的当前目录作为 workspace root。若该目录已注册，会直接复用对应 workspace；若还未注册，会先询问是否信任并注册该目录。会话 transcript 会写入：
+
+```text
+%USERPROFILE%\.auditable-agent\sessions\<session-id>.jsonl
+```
+
+常用 slash commands：
+
+```text
+/status        查看当前 base URL、workspace、权限预设、task/run 状态
+/plan          查看当前 run 的计划项
+/diff          查看当前 run 记录的文件变更和 diff 摘要
+/approvals     查看当前 run 的审批请求，或全局待审批请求
+/permissions   查看或设置权限预设：read-only、workspace-write、full-auto
+/workspace     查看当前目录解析出的 workspace，或为本终端会话临时指定 workspace UUID
+/resume last   恢复最近会话
+/new           在当前终端会话内开始新对话
+/clear         清屏
+/exit          退出
+```
+
+权限预设在 V1 中映射到现有可审计 runtime 行为：
+
+```text
+read-only：编码请求会转为 review-agent，避免写 workspace。
+workspace-write：默认编码模式，写入仍受 WorkspacePathGuard、审批和审计约束。
+full-auto：只复用已配置的命令策略，不提供绕过审批和 workspace 保护的 yolo 模式。
+```
+
+Dashboard 的“设置”和“CLI 会话”页面会读取同一个本机后端配置目录，用于可视化配置和查看最近 CLI 会话摘要。
 
 ### 完整闭环示例
 

@@ -7,6 +7,7 @@ import { Memory } from "./pages/Memory";
 import { Replay } from "./pages/Replay";
 import { RunDetail } from "./pages/RunDetail";
 import { Settings } from "./pages/Settings";
+import { CliSessions } from "./pages/CliSessions";
 import { Tasks } from "./pages/Tasks";
 import { UserInputs } from "./pages/UserInputs";
 import { WorkflowAudit } from "./pages/WorkflowAudit";
@@ -27,6 +28,7 @@ const router = createBrowserRouter([
       { path: "inputs", element: <UserInputs /> },
       { path: "memory", element: <Memory /> },
       { path: "context", element: <Context /> },
+      { path: "cli-sessions", element: <CliSessions /> },
       { path: "settings", element: <Settings /> }
     ]
   }
