@@ -1,6 +1,5 @@
 import { Background, Controls, MiniMap, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { WorkflowEdgeDecision, WorkflowNodeExecution } from "../types";
 import { statusTone } from "../lib/utils";
 
 const toneColor: Record<string, string> = {
@@ -10,27 +9,48 @@ const toneColor: Record<string, string> = {
   neutral: "#94a3b8"
 };
 
+export type WorkflowGraphNode = {
+  id: string;
+  type: string;
+  status?: string;
+  summary?: string;
+};
+
+export type WorkflowGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  condition?: string;
+  reason?: string;
+  selected?: boolean;
+};
+
 export function WorkflowGraph({
   nodes,
-  edges
+  edges,
+  heightClassName = "h-[420px]"
 }: {
-  nodes: WorkflowNodeExecution[];
-  edges: WorkflowEdgeDecision[];
+  nodes: WorkflowGraphNode[];
+  edges: WorkflowGraphEdge[];
+  heightClassName?: string;
 }) {
-  const uniqueNodes = Array.from(new Map(nodes.map((node) => [node.nodeId, node])).values());
+  const uniqueNodes = Array.from(new Map(nodes.map((node) => [node.id, node])).values());
   const flowNodes: Node[] = uniqueNodes.map((node, index) => {
-    const tone = statusTone(node.status);
+    const tone = statusTone(node.status ?? "PENDING");
     return {
-      id: node.nodeId,
+      id: node.id,
       position: { x: (index % 4) * 230, y: Math.floor(index / 4) * 140 },
       data: {
         label: (
           <div className="min-w-40">
-            <div className="text-xs font-semibold uppercase text-slate-200">{node.nodeId}</div>
-            <div className="mt-1 text-[10px] text-slate-400">{node.nodeType}</div>
-            <div className="mt-2 text-[10px]" style={{ color: toneColor[tone] }}>
-              {node.status}
-            </div>
+            <div className="text-xs font-semibold uppercase text-slate-200">{node.id}</div>
+            <div className="mt-1 text-[10px] text-slate-400">{node.type}</div>
+            {node.status ? (
+              <div className="mt-2 text-[10px]" style={{ color: toneColor[tone] }}>
+                {node.status}
+              </div>
+            ) : null}
           </div>
         )
       },
@@ -46,16 +66,16 @@ export function WorkflowGraph({
 
   const flowEdges: Edge[] = edges.map((edge) => ({
     id: edge.id,
-    source: edge.fromNode,
-    target: edge.toNode,
-    animated: edge.selected,
-    label: edge.edgeType,
+    source: edge.source,
+    target: edge.target,
+    animated: Boolean(edge.selected),
+    label: edge.condition || edge.type,
     style: { stroke: edge.selected ? "#14b8a6" : "#64748b" },
     labelStyle: { fill: "#cbd5e1", fontSize: 10 }
   }));
 
   return (
-    <div className="h-[420px] overflow-hidden rounded-md border bg-background">
+    <div className={`${heightClassName} overflow-hidden rounded-md border bg-background`}>
       <ReactFlow nodes={flowNodes} edges={flowEdges} fitView>
         <Background color="#334155" gap={18} />
         <MiniMap pannable zoomable nodeColor={(node) => String(node.style?.border ?? "#94a3b8")} />

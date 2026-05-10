@@ -19,6 +19,21 @@ export function RunDetail() {
   const changes = useQuery({ queryKey: ["changes", taskId], queryFn: () => api.taskChanges(taskId), enabled: Boolean(taskId), retry: false });
   const failures = useQuery({ queryKey: ["task-failures", taskId], queryFn: () => api.taskFailures(taskId), enabled: Boolean(taskId), retry: false });
   const report = useQuery({ queryKey: ["report", taskId], queryFn: () => api.taskReport(taskId), enabled: Boolean(taskId), retry: false });
+  const graphNodes = (nodes.data ?? []).map((node) => ({
+    id: node.nodeId,
+    type: node.nodeType,
+    status: node.status,
+    summary: node.outputSummary
+  }));
+  const graphEdges = (edges.data ?? []).map((edge) => ({
+    id: edge.id,
+    source: edge.fromNodeId,
+    target: edge.toNodeId,
+    type: edge.edgeType,
+    condition: edge.conditionSummary || undefined,
+    reason: edge.decisionReason,
+    selected: edge.selected
+  }));
 
   return (
     <div className="space-y-4">
@@ -36,7 +51,7 @@ export function RunDetail() {
         <Card>
           <CardHeader><CardTitle>工作流图</CardTitle></CardHeader>
           <CardContent>
-            {nodes.data?.length ? <WorkflowGraph nodes={nodes.data} edges={edges.data ?? []} /> : <EmptyState title="暂无工作流节点记录" />}
+            {nodes.data?.length ? <WorkflowGraph nodes={graphNodes} edges={graphEdges} /> : <EmptyState title="暂无工作流节点记录" />}
           </CardContent>
         </Card>
         <Card>

@@ -15,7 +15,13 @@ export type WorkflowDefinition = {
   description: string;
   mode: string;
   enabled: boolean;
-  definitionJson: Record<string, any>;
+  definition: {
+    start?: string;
+    limits?: Record<string, any>;
+    nodes?: Array<string | { id: string; type?: string; input?: Record<string, any> }>;
+    edges?: Array<{ from: string; to: string; type?: string; condition?: string }>;
+    [key: string]: any;
+  };
   createdAt?: string;
   updatedAt?: string;
 };
@@ -75,8 +81,8 @@ export type WorkflowEdgeDecision = {
   taskId: Id;
   runId: Id;
   workflowDefinitionId: Id;
-  fromNode: string;
-  toNode: string;
+  fromNodeId: string;
+  toNodeId: string;
   edgeType: string;
   conditionSummary?: string;
   decisionReason?: string;
