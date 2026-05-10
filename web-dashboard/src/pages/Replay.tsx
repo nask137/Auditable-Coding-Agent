@@ -33,7 +33,7 @@ export function Replay() {
   const timeline = useMemo<ReplayItem[]>(() => {
     const items: ReplayItem[] = [
       ...(nodes.data ?? []).map((node) => ({ id: node.id, type: "node", title: `${node.nodeId} ${node.status}`, time: node.completedAt ?? node.startedAt, payload: node })),
-      ...(edges.data ?? []).map((edge) => ({ id: edge.id, type: "edge", title: `${edge.fromNode} -> ${edge.toNode}`, time: edge.createdAt, payload: edge })),
+      ...(edges.data ?? []).map((edge) => ({ id: edge.id, type: "edge", title: `${edge.fromNodeId} -> ${edge.toNodeId}`, time: edge.createdAt, payload: edge })),
       ...(events.data ?? []).map((event) => ({ id: event.id, type: "event", title: event.eventType ?? event.actionType ?? "审计事件", time: event.createdAt, payload: event })),
       ...(changes.data ?? []).map((change) => ({ id: change.id, type: "change", title: change.path ?? "文件变更", time: change.createdAt, payload: change })),
       ...(failures.data ?? []).map((failure) => ({ id: failure.id, type: "failure", title: failure.message ?? failure.failureType ?? "失败", time: failure.createdAt, payload: failure }))

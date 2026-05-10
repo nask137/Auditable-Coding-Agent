@@ -79,16 +79,16 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
                 if (Domain.WorkflowNodeType.FINISH.name().equals(node.type())) {
                     return;
                 }
-                var next = selectNext(graph, node.id(), withTransientData(stateAssembler.assemble(runId), transientData),
-                        result);
+                var decisionState = withTransientData(stateAssembler.assemble(runId), transientData);
+                var next = selectNext(graph, node.id(), decisionState, result);
                 if (next == null) {
                     failRun(runId, "No workflow edge matched after node " + node.id() + " with status "
                             + lastResult.status());
                     return;
                 }
                 workflowService.recordEdge(state.task().id(), runId, workflow, node.id(), next.to(),
-                        Domain.WorkflowEdgeType.valueOf(next.type()), edgeCondition(next), "Selected by workflow runtime",
-                        Map.of("lastStatus", result.status()));
+                        Domain.WorkflowEdgeType.valueOf(next.type()), edgeCondition(next),
+                        edgeDecisionReason(next, decisionState, result), edgeMetadata(next, decisionState, result));
                 current = next.to();
             }
         } catch (RuntimeException e) {
@@ -164,6 +164,64 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
 
     private String edgeCondition(WorkflowEdge edge) {
         return edge.condition().isBlank() ? edge.type() : edge.condition();
+    }
+
+    private String edgeDecisionReason(WorkflowEdge edge, AgentState state, NodeExecutionResult result) {
+        var type = Domain.WorkflowEdgeType.valueOf(edge.type());
+        var base = switch (type) {
+            case ALWAYS -> "Edge is unconditional";
+            case ON_SUCCESS -> "Previous node completed with SUCCESS";
+            case ON_FAILURE -> "Previous node completed with FAILURE";
+            case ON_BLOCKED -> "Previous node completed with BLOCKED";
+            case ON_WAITING_APPROVAL -> "Previous node is waiting for approval";
+            case ON_WAITING_USER_INPUT -> "Previous node is waiting for user input";
+            case CONDITION -> "Condition '" + edge.condition() + "' evaluated to true";
+            default -> "Workflow edge matched";
+        };
+        return base + "; selected transition " + edge.from() + " -> " + edge.to()
+                + "; node output: " + summarize(result.summary())
+                + planItemContext(state);
+    }
+
+    private Map<String, Object> edgeMetadata(WorkflowEdge edge, AgentState state, NodeExecutionResult result) {
+        var metadata = new HashMap<String, Object>();
+        metadata.put("fromNode", edge.from());
+        metadata.put("toNode", edge.to());
+        metadata.put("edgeType", edge.type());
+        metadata.put("condition", edge.condition());
+        metadata.put("lastStatus", result.status());
+        metadata.put("lastSummary", summarize(result.summary()));
+        if (state.currentPlanItem() != null) {
+            var item = state.currentPlanItem();
+            metadata.put("currentPlanItemId", item.id().toString());
+            metadata.put("currentPlanItemOrder", item.orderIndex());
+            metadata.put("currentPlanItemStatus", item.status());
+            metadata.put("currentPlanItem", "#" + item.orderIndex() + " " + item.status() + " - "
+                    + summarize(item.description()));
+        } else {
+            metadata.put("currentPlanItem", "none");
+        }
+        metadata.put("hasPlan", state.plan() != null);
+        metadata.put("recentValidationCount", state.recentValidationResults().size());
+        metadata.put("recentFailureCount", state.runtimeFailures().size());
+        return metadata;
+    }
+
+    private String planItemContext(AgentState state) {
+        if (state.currentPlanItem() == null) {
+            return "; current plan item: none";
+        }
+        var item = state.currentPlanItem();
+        return "; current plan item: #" + item.orderIndex() + " " + item.status() + " - "
+                + summarize(item.description());
+    }
+
+    private String summarize(String value) {
+        if (value == null || value.isBlank()) {
+            return "-";
+        }
+        var normalized = value.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= 180 ? normalized : normalized.substring(0, 177) + "...";
     }
 
     private boolean isPaused(NodeExecutionResult result) {

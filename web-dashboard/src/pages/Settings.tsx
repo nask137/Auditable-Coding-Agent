@@ -42,7 +42,6 @@ export function Settings() {
           <CardHeader><CardTitle>CLI 默认值</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <Input value={settings.baseUrl} onChange={(e) => setSettings({ ...settings, baseUrl: e.target.value })} />
-            <Input value={settings.workspaceId} onChange={(e) => setSettings({ ...settings, workspaceId: e.target.value })} />
             <Select value={settings.workflow} onChange={(e) => setSettings({ ...settings, workflow: e.target.value })}>
               <option value="coding-agent">coding-agent</option>
               <option value="review-agent">review-agent</option>
