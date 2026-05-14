@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api";
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ConfirmButton, EmptyState, ErrorState, Input, JsonBlock, Select, Table, Td, Textarea, Th } from "../components/ui";
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorState, Input, JsonBlock, Select, Table, Td, Textarea, Th } from "../components/ui";
 import { formatDate } from "../lib/utils";
 
 export function Memory() {
@@ -19,9 +19,6 @@ export function Memory() {
       qc.invalidateQueries({ queryKey: ["memory", resolved] });
     }
   });
-  const approve = useMutation({ mutationFn: api.approveMemoryProposal, onSuccess: () => qc.invalidateQueries({ queryKey: ["memory-proposals", resolved] }) });
-  const reject = useMutation({ mutationFn: (id: string) => api.rejectMemoryProposal(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["memory-proposals", resolved] }) });
-
   return (
     <div className="space-y-4">
       <Card>
@@ -81,10 +78,7 @@ export function Memory() {
                 <span className="text-xs text-muted-foreground">{formatDate(proposal.createdAt)}</span>
               </div>
               <JsonBlock className="mt-3" value={proposal} />
-              <div className="mt-3 flex gap-2">
-                <ConfirmButton variant="default" message="批准此记忆提案？" onConfirm={() => approve.mutate(proposal.id)}>批准</ConfirmButton>
-                <ConfirmButton message="拒绝此记忆提案？" onConfirm={() => reject.mutate(proposal.id)}>拒绝</ConfirmButton>
-              </div>
+              <div className="mt-3 text-xs text-muted-foreground">记忆提案处理仅在 CLI 中进行。</div>
             </div>
           )) : <EmptyState title="暂无记忆提案" />}
         </CardContent>

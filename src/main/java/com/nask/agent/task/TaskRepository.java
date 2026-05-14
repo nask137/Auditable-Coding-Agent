@@ -10,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -34,8 +35,13 @@ public class TaskRepository {
      */
     public CodingTask insert(CodingTask task) {
         jdbc.update("""
-                insert into task (id, workspace_id, title, user_request, status, created_at, updated_at)
-                values (:id, :workspaceId, :title, :userRequest, :status, :createdAt, :updatedAt)
+                insert into task (
+                  id, workspace_id, conversation_id, prompt_index, title, user_request,
+                  status, created_at, updated_at
+                ) values (
+                  :id, :workspaceId, :conversationId, :promptIndex, :title, :userRequest,
+                  :status, :createdAt, :updatedAt
+                )
                 """, params(task));
         return task;
     }
@@ -46,6 +52,13 @@ public class TaskRepository {
     public Optional<CodingTask> findById(UUID id) {
         return jdbc.query("select * from task where id = :id", new MapSqlParameterSource("id", id), mapper())
                 .stream().findFirst();
+    }
+
+    /**
+     * Lists tasks newest first for read-only dashboard selection.
+     */
+    public List<CodingTask> findAll() {
+        return jdbc.query("select * from task order by updated_at desc", mapper());
     }
 
     /**
@@ -63,6 +76,8 @@ public class TaskRepository {
         return new MapSqlParameterSource()
                 .addValue("id", task.id())
                 .addValue("workspaceId", task.workspaceId())
+                .addValue("conversationId", task.conversationId())
+                .addValue("promptIndex", task.promptIndex())
                 .addValue("title", task.title())
                 .addValue("userRequest", task.userRequest())
                 .addValue("status", task.status())
@@ -78,6 +93,8 @@ public class TaskRepository {
         return new CodingTask(
                 rs.getObject("id", UUID.class),
                 rs.getObject("workspace_id", UUID.class),
+                rs.getObject("conversation_id", UUID.class),
+                rs.getInt("prompt_index"),
                 rs.getString("title"),
                 rs.getString("user_request"),
                 rs.getString("status"),

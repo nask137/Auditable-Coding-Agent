@@ -1,8 +1,9 @@
 package com.nask.agent.task;
 
 import com.nask.agent.run.AgentLoopExecutor;
-import com.nask.agent.run.AgentRun;
 import com.nask.agent.run.AgentRunService;
+import com.nask.agent.run.RunTimeline;
+import com.nask.agent.run.RunTimelineService;
 import com.nask.agent.workflow.WorkflowService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -26,17 +28,28 @@ public class TaskController {
     private final AgentLoopExecutor loopExecutor;
     private final com.nask.agent.run.AgentRunAsyncExecutor asyncExecutor;
     private final WorkflowService workflowService;
+    private final RunTimelineService timelineService;
 
     /**
      * Creates a task controller with task and run orchestration services.
      */
     public TaskController(TaskService taskService, AgentRunService runService, AgentLoopExecutor loopExecutor,
-                          com.nask.agent.run.AgentRunAsyncExecutor asyncExecutor, WorkflowService workflowService) {
+                          com.nask.agent.run.AgentRunAsyncExecutor asyncExecutor, WorkflowService workflowService,
+                          RunTimelineService timelineService) {
         this.taskService = taskService;
         this.runService = runService;
         this.loopExecutor = loopExecutor;
         this.asyncExecutor = asyncExecutor;
         this.workflowService = workflowService;
+        this.timelineService = timelineService;
+    }
+
+    /**
+     * Lists tasks for read-only dashboard selectors.
+     */
+    @GetMapping
+    List<CodingTask> list() {
+        return taskService.list();
     }
 
     /**
@@ -59,7 +72,7 @@ public class TaskController {
      * Starts a synchronous Phase 1 agent run for the task.
      */
     @PostMapping("/{taskId}/start")
-    AgentRun start(@PathVariable UUID taskId,
+    CodingTask start(@PathVariable UUID taskId,
                    @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
         var task = taskService.getRequired(taskId);
         var workflowDefinition = workflowService.requireEnabledByName(workflow);
@@ -67,20 +80,20 @@ public class TaskController {
         // Phase 1 runs inline so API clients can immediately observe the final
         // state or a WAITING_APPROVAL pause without a background worker.
         loopExecutor.execute(run.id());
-        return runService.getRequired(run.id());
+        return taskService.getRequired(taskId);
     }
 
     /**
      * Starts a run on a background worker for interactive polling clients.
      */
     @PostMapping("/{taskId}/start-async")
-    AgentRun startAsync(@PathVariable UUID taskId,
+    CodingTask startAsync(@PathVariable UUID taskId,
                         @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
         var task = taskService.getRequired(taskId);
         var workflowDefinition = workflowService.requireEnabledByName(workflow);
         var run = runService.createRun(task, workflowDefinition.name());
         asyncExecutor.submit(task.id(), run.id());
-        return run;
+        return taskService.getRequired(taskId);
     }
 
     /**
@@ -89,5 +102,13 @@ public class TaskController {
     @PostMapping("/{taskId}/cancel")
     CodingTask cancel(@PathVariable UUID taskId) {
         return taskService.cancel(taskId);
+    }
+
+    /**
+     * Returns the full task execution timeline. Task id is the execution id in the single-run model.
+     */
+    @GetMapping("/{taskId}/timeline")
+    RunTimeline timeline(@PathVariable UUID taskId) {
+        return timelineService.get(taskId);
     }
 }

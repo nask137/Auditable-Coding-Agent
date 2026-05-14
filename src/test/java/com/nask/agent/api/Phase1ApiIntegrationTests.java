@@ -52,215 +52,6 @@ class Phase1ApiIntegrationTests {
     @BeforeEach
     void setup() throws IOException {
         workspaceDir = TestFiles.createTempDirectory("agent-api-workspace-");
-        jdbc.execute("""
-                create table if not exists workflow_definition (
-                  id uuid primary key,
-                  name text not null,
-                  version int not null,
-                  description text not null,
-                  mode text not null,
-                  enabled boolean not null,
-                  definition_json jsonb not null,
-                  created_at timestamptz not null,
-                  updated_at timestamptz not null,
-                  constraint uq_workflow_definition_name_version unique (name, version)
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists workflow_node_execution (
-                  id uuid primary key,
-                  task_id uuid not null references task(id),
-                  run_id uuid not null references agent_run(id),
-                  workflow_definition_id uuid not null references workflow_definition(id),
-                  node_id text not null,
-                  node_type text not null,
-                  agent_step_id uuid references agent_step(id),
-                  status text not null,
-                  input_summary text,
-                  output_summary text,
-                  failure_id uuid references runtime_failure(id),
-                  started_at timestamptz not null,
-                  completed_at timestamptz,
-                  metadata_json jsonb not null
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists workflow_edge_decision (
-                  id uuid primary key,
-                  task_id uuid not null references task(id),
-                  run_id uuid not null references agent_run(id),
-                  workflow_definition_id uuid not null references workflow_definition(id),
-                  from_node_id text not null,
-                  to_node_id text not null,
-                  edge_type text not null,
-                  condition_summary text,
-                  decision_reason text not null,
-                  selected boolean not null,
-                  created_at timestamptz not null,
-                  metadata_json jsonb not null
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists project_scan_run (
-                  id uuid primary key,
-                  workspace_id uuid not null references workspace(id),
-                  task_id uuid references task(id),
-                  run_id uuid references agent_run(id),
-                  status text not null,
-                  scan_reason text not null,
-                  started_at timestamptz not null,
-                  completed_at timestamptz,
-                  files_seen int not null,
-                  files_indexed int not null,
-                  files_skipped int not null,
-                  summary text not null,
-                  metadata_json jsonb not null
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists project_profile (
-                  id uuid primary key,
-                  workspace_id uuid not null references workspace(id),
-                  language_summary text not null,
-                  frameworks_json jsonb not null,
-                  build_tools_json jsonb not null,
-                  test_tools_json jsonb not null,
-                  package_managers_json jsonb not null,
-                  entrypoints_json jsonb not null,
-                  important_paths_json jsonb not null,
-                  docs_paths_json jsonb not null,
-                  config_paths_json jsonb not null,
-                  last_scan_run_id uuid references project_scan_run(id),
-                  confidence numeric(5, 2) not null,
-                  created_at timestamptz not null,
-                  updated_at timestamptz not null,
-                  constraint uq_project_profile_workspace unique (workspace_id)
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists indexed_document (
-                  id uuid primary key,
-                  workspace_id uuid not null references workspace(id),
-                  scan_run_id uuid references project_scan_run(id),
-                  path text not null,
-                  document_type text not null,
-                  title text not null,
-                  chunk_index int not null,
-                  content text not null,
-                  content_hash text not null,
-                  line_start int not null,
-                  line_end int not null,
-                  token_count int not null,
-                  metadata_json jsonb not null,
-                  created_at timestamptz not null,
-                  constraint uq_indexed_document_content unique (workspace_id, document_type, path, chunk_index, content_hash)
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists code_symbol (
-                  id uuid primary key,
-                  workspace_id uuid not null references workspace(id),
-                  scan_run_id uuid references project_scan_run(id),
-                  path text not null,
-                  language text not null,
-                  symbol_type text not null,
-                  symbol_name text not null,
-                  container_name text,
-                  signature text not null,
-                  line_start int not null,
-                  line_end int not null,
-                  visibility text,
-                  metadata_json jsonb not null,
-                  created_at timestamptz not null
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists project_memory_item (
-                  id uuid primary key,
-                  workspace_id uuid not null references workspace(id),
-                  memory_type text not null,
-                  scope text not null,
-                  title text not null,
-                  content text not null,
-                  source_type text not null,
-                  source_id uuid,
-                  source_path text,
-                  source_line_start int,
-                  source_line_end int,
-                  status text not null,
-                  confidence numeric(5, 2) not null,
-                  expires_at timestamptz,
-                  created_by text not null,
-                  created_at timestamptz not null,
-                  approved_by text,
-                  approved_at timestamptz,
-                  metadata_json jsonb not null
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists memory_retrieval (
-                  id uuid primary key,
-                  workspace_id uuid not null references workspace(id),
-                  task_id uuid references task(id),
-                  run_id uuid references agent_run(id),
-                  workflow_node_execution_id uuid references workflow_node_execution(id),
-                  query_text text not null,
-                  filters_json jsonb not null,
-                  result_refs_json jsonb not null,
-                  summary text not null,
-                  created_at timestamptz not null
-                )
-                """);
-        jdbc.execute("""
-                create table if not exists memory_write_proposal (
-                  id uuid primary key,
-                  workspace_id uuid not null references workspace(id),
-                  task_id uuid references task(id),
-                  run_id uuid references agent_run(id),
-                  proposal_type text not null,
-                  title text not null,
-                  content text not null,
-                  source_refs_json jsonb not null,
-                  status text not null,
-                  approval_request_id uuid references approval_request(id),
-                  project_memory_item_id uuid references project_memory_item(id),
-                  created_at timestamptz not null,
-                  resolved_at timestamptz,
-                  metadata_json jsonb not null
-                )
-                """);
-        jdbc.execute("""
-                truncate table
-                  memory_write_proposal,
-                  memory_retrieval,
-                  project_memory_item,
-                  code_symbol,
-                  indexed_document,
-                  project_profile,
-                  project_scan_run,
-                  workflow_edge_decision,
-                  workflow_node_execution,
-                  workflow_definition,
-                  user_input_request,
-                  runtime_failure,
-                  validation_result,
-                  task_report,
-                  audit_event,
-                  command_execution,
-                  file_change,
-                  approval_request,
-                  tool_result,
-                  tool_call,
-                  agent_action,
-                  agent_step,
-                  plan_item,
-                  plan,
-                  agent_run,
-                  task,
-                  command_policy,
-                  workspace
-                restart identity cascade
-                """);
     }
 
     @AfterEach
@@ -383,15 +174,15 @@ class Phase1ApiIntegrationTests {
                 "trusted", true));
         var workspaceId = workspace.get("id").toString();
         var taskId = UUID.randomUUID();
-        var runId = UUID.randomUUID();
+        var runId = taskId;
         jdbc.update("""
-                insert into task (id, workspace_id, title, user_request, status, created_at, updated_at)
-                values (?, ?::uuid, 'historical task', 'summarize project', 'COMPLETED', now(), now())
+                insert into task (
+                  id, workspace_id, title, user_request, status, agent_mode,
+                  execution_started_at, execution_finished_at, runtime_metadata, created_at, updated_at
+                )
+                values (?, ?::uuid, 'historical task', 'summarize project', 'COMPLETED', 'CODE_EDIT',
+                        now(), now(), '{}'::jsonb, now(), now())
                 """, taskId, workspaceId);
-        jdbc.update("""
-                insert into agent_run (id, task_id, agent_mode, status, started_at, finished_at, failure_reason, runtime_metadata)
-                values (?, ?, 'CODE_EDIT', 'COMPLETED', now(), now(), null, '{}'::jsonb)
-                """, runId, taskId);
         jdbc.update("""
                 insert into task_report (id, task_id, run_id, content_md, created_at)
                 values (?, ?, ?, '## Historical Report\n\nUse mvn test for validation.', now())
@@ -522,8 +313,7 @@ class Phase1ApiIntegrationTests {
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
 
         var approvals = getList("/api/approvals?status=PENDING");
-        assertThat(approvals).hasSize(1);
-        var approvalId = approvals.getFirst().get("id").toString();
+        var approvalId = commandApprovalId(approvals, runId);
 
         post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "test"));
 
@@ -599,8 +389,7 @@ class Phase1ApiIntegrationTests {
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
 
         var approvals = getList("/api/approvals?status=PENDING");
-        assertThat(approvals).hasSize(1);
-        var approvalId = approvals.getFirst().get("id").toString();
+        var approvalId = commandApprovalId(approvals, runId);
 
         post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "test", "reason", "not needed"));
 
@@ -696,8 +485,8 @@ class Phase1ApiIntegrationTests {
 
         var currentTask = getMap("/api/tasks/" + taskId);
         assertThat(currentTask.get("status")).isEqualTo("CREATED");
-        assertThat(jdbc.queryForObject("select count(*) from agent_run where task_id = ?",
-                Integer.class, java.util.UUID.fromString(taskId))).isZero();
+        assertThat(jdbc.queryForObject("select execution_started_at is null from task where id = ?",
+                Boolean.class, java.util.UUID.fromString(taskId))).isTrue();
     }
 
     @Test
@@ -726,7 +515,7 @@ class Phase1ApiIntegrationTests {
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
 
         var approvals = getList("/api/approvals?status=PENDING");
-        var approvalId = approvals.getFirst().get("id").toString();
+        var approvalId = commandApprovalId(approvals, runId);
         post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "test"));
 
         var completedRun = getMap("/api/runs/" + runId);
@@ -782,7 +571,7 @@ class Phase1ApiIntegrationTests {
                 """, String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
 
         var approvals = getList("/api/approvals?status=PENDING");
-        var approvalId = approvals.getFirst().get("id").toString();
+        var approvalId = commandApprovalId(approvals, runId);
         post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "test", "reason", "not needed"));
 
         var failedRun = getMap("/api/runs/" + runId);
@@ -901,6 +690,17 @@ class Phase1ApiIntegrationTests {
 
     private URI uri(String path) {
         return URI.create("http://localhost:" + port + path);
+    }
+
+    private String commandApprovalId(List<Map<String, Object>> approvals, String runId) {
+        var matches = approvals.stream()
+                .filter(approval -> runId.equals(approval.get("runId").toString()))
+                .filter(approval -> "COMMAND_EXECUTION".equals(approval.get("approvalType")))
+                .toList();
+        assertThat(matches)
+                .describedAs("pending command approvals for run %s in %s", runId, approvals)
+                .hasSize(1);
+        return matches.getFirst().get("id").toString();
     }
 
     private List<String> stringList(Object value) {

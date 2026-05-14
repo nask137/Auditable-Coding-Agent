@@ -1,21 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Brain, Database, MessageSquare, ShieldCheck, Workflow } from "lucide-react";
+import { Brain, Database, GitBranch, ListChecks, Workflow } from "lucide-react";
 import { api } from "../lib/api";
-import { compactId, formatDate } from "../lib/utils";
+import { formatDate } from "../lib/utils";
 import { Badge, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorState, Table, Td, Th } from "../components/ui";
 
 export function Dashboard() {
   const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: api.workspaces });
   const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
-  const approvals = useQuery({ queryKey: ["approvals", "PENDING"], queryFn: () => api.approvals("PENDING") });
-  const inputs = useQuery({ queryKey: ["inputs", "PENDING"], queryFn: () => api.userInputs("PENDING") });
+  const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks });
+  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
 
   const cards = [
     { label: "工作区", value: workspaces.data?.length ?? 0, icon: Database, to: "/workspaces" },
     { label: "工作流", value: workflows.data?.length ?? 0, icon: Workflow, to: "/workflow" },
-    { label: "待审批", value: approvals.data?.length ?? 0, icon: ShieldCheck, to: "/approvals" },
-    { label: "用户输入", value: inputs.data?.length ?? 0, icon: MessageSquare, to: "/inputs" }
+    { label: "任务记录", value: tasks.data?.length ?? 0, icon: ListChecks },
+    { label: "运行记录", value: runs.data?.length ?? 0, icon: GitBranch, to: "/replay" }
   ];
 
   const firstWorkspace = workspaces.data?.[0];
@@ -34,8 +34,20 @@ export function Dashboard() {
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-4">
         {cards.map((card) => (
-          <Link key={card.label} to={card.to}>
-            <Card className="transition hover:border-primary/50">
+          card.to ? (
+            <Link key={card.label} to={card.to}>
+              <Card className="transition hover:border-primary/50">
+                <CardContent className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs uppercase text-muted-foreground">{card.label}</div>
+                    <div className="mt-2 text-3xl font-semibold">{card.value}</div>
+                  </div>
+                  <card.icon className="h-7 w-7 text-primary" />
+                </CardContent>
+              </Card>
+            </Link>
+          ) : (
+            <Card key={card.label}>
               <CardContent className="flex items-center justify-between">
                 <div>
                   <div className="text-xs uppercase text-muted-foreground">{card.label}</div>
@@ -44,52 +56,44 @@ export function Dashboard() {
                 <card.icon className="h-7 w-7 text-primary" />
               </CardContent>
             </Card>
-          </Link>
+          )
         ))}
       </div>
 
-      {(workspaces.error || workflows.error || approvals.error || inputs.error) && (
-        <ErrorState error={workspaces.error || workflows.error || approvals.error || inputs.error} />
+      {(workspaces.error || workflows.error || tasks.error || runs.error) && (
+        <ErrorState error={workspaces.error || workflows.error || tasks.error || runs.error} />
       )}
 
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
           <CardHeader>
-            <CardTitle>运行时待处理队列</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-amber-300" />
+            <CardTitle>最近运行</CardTitle>
+            <GitBranch className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            {approvals.data?.length || inputs.data?.length ? (
+            {runs.data?.length ? (
               <Table>
                 <thead>
                   <tr>
-                    <Th>类型</Th>
-                    <Th>ID</Th>
+                    <Th>运行</Th>
+                    <Th>任务</Th>
                     <Th>状态</Th>
-                    <Th>创建时间</Th>
+                    <Th>开始时间</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {approvals.data?.slice(0, 5).map((item) => (
-                    <tr key={item.id}>
-                      <Td>审批</Td>
-                      <Td className="mono">{compactId(item.id)}</Td>
-                      <Td><Badge>{item.status}</Badge></Td>
-                      <Td>{formatDate(item.createdAt)}</Td>
-                    </tr>
-                  ))}
-                  {inputs.data?.slice(0, 5).map((item) => (
-                    <tr key={item.id}>
-                      <Td>用户输入</Td>
-                      <Td className="mono">{compactId(item.id)}</Td>
-                      <Td><Badge>{item.status}</Badge></Td>
-                      <Td>{formatDate(item.createdAt)}</Td>
+                  {runs.data.slice(0, 8).map((run) => (
+                    <tr key={run.id}>
+                      <Td><Link className="text-primary underline" to={`/runs/${run.id}?taskId=${run.taskId}`}>{run.id}</Link></Td>
+                      <Td className="mono">{run.taskId}</Td>
+                      <Td><Badge>{run.status}</Badge></Td>
+                      <Td>{formatDate(run.startedAt)}</Td>
                     </tr>
                   ))}
                 </tbody>
               </Table>
             ) : (
-              <EmptyState title="暂无待处理运行时干预" detail="审批和用户输入请求均已清空。" />
+              <EmptyState title="暂无运行记录" detail="任务创建、启动和交互处理仅在 CLI 中进行。" />
             )}
           </CardContent>
         </Card>

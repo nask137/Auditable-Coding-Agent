@@ -62,20 +62,22 @@ class CliSessionStore {
         }
         var node = mapper.readTree(last);
         var state = new LinkedHashMap<String, String>();
-        for (var field : new String[]{"workspaceId", "taskId", "runId", "status"}) {
+        for (var field : new String[]{"workspaceId", "conversationId", "taskId", "runId", "status"}) {
             var value = node.get(field);
             state.put(field, value == null || value.isNull() ? "" : value.asText());
         }
         return state;
     }
 
-    void append(String type, String workspaceId, String taskId, String runId, String status, String text)
+    void append(String type, String workspaceId, String conversationId, String taskId, String runId, String status,
+                String text)
             throws IOException {
         Files.createDirectories(sessionsDir);
         var event = new LinkedHashMap<String, Object>();
         event.put("timestamp", Instant.now().toString());
         event.put("type", type);
         event.put("workspaceId", workspaceId == null ? "" : workspaceId);
+        event.put("conversationId", conversationId == null ? "" : conversationId);
         event.put("taskId", taskId == null ? "" : taskId);
         event.put("runId", runId == null ? "" : runId);
         event.put("status", status == null ? "" : status);

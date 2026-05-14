@@ -1,7 +1,6 @@
 import type {
   AgentRun,
   AgentStep,
-  ApprovalRequest,
   AuditEvent,
   CodeSymbol,
   CliRuntimeSettings,
@@ -16,7 +15,6 @@ import type {
   ProjectProfile,
   RuntimeFailure,
   TaskReport,
-  UserInputRequest,
   WorkflowDefinition,
   WorkflowEdgeDecision,
   WorkflowNodeExecution,
@@ -53,12 +51,9 @@ export const api = {
     request<Workspace>("/api/workspaces", { method: "POST", body }),
   workflows: () => request<WorkflowDefinition[]>("/api/workflows"),
   workflow: (id: string) => request<WorkflowDefinition>(`/api/workflows/${id}`),
-  createTask: (body: { workspaceId: string; userRequest: string }) =>
-    request<CodingTask>("/api/tasks", { method: "POST", body }),
+  tasks: () => request<CodingTask[]>("/api/tasks"),
   task: (id: string) => request<CodingTask>(`/api/tasks/${id}`),
-  startTask: (taskId: string, workflow = "coding-agent") =>
-    request<AgentRun>(`/api/tasks/${taskId}/start?workflow=${encodeURIComponent(workflow)}`, { method: "POST" }),
-  cancelTask: (taskId: string) => request<CodingTask>(`/api/tasks/${taskId}/cancel`, { method: "POST" }),
+  runs: () => request<AgentRun[]>("/api/runs"),
   run: (runId: string) => request<AgentRun>(`/api/runs/${runId}`),
   runPlan: (runId: string) => request<PlanView>(`/api/runs/${runId}/plan`),
   runSteps: (runId: string) => request<AgentStep[]>(`/api/runs/${runId}/steps`),
@@ -70,16 +65,6 @@ export const api = {
   taskChanges: (taskId: string) => request<FileChange[]>(`/api/tasks/${taskId}/changes`),
   taskFailures: (taskId: string) => request<RuntimeFailure[]>(`/api/tasks/${taskId}/failures`),
   taskReport: (taskId: string) => request<TaskReport>(`/api/tasks/${taskId}/report`),
-  approvals: (status?: string) => request<ApprovalRequest[]>(`/api/approvals${status ? `?status=${status}` : ""}`),
-  approve: (id: string, reason?: string) =>
-    request<ApprovalRequest>(`/api/approvals/${id}/approve`, { method: "POST", body: { resolvedBy: "web-dashboard", reason } }),
-  deny: (id: string, reason = "Denied from web dashboard") =>
-    request<ApprovalRequest>(`/api/approvals/${id}/deny`, { method: "POST", body: { resolvedBy: "web-dashboard", reason } }),
-  userInputs: (status?: string) =>
-    request<UserInputRequest[]>(`/api/user-input-requests${status ? `?status=${status}` : ""}`),
-  answerUserInput: (id: string, answer: string) =>
-    request<UserInputRequest>(`/api/user-input-requests/${id}/answer`, { method: "POST", body: { answer } }),
-  cancelUserInput: (id: string) => request<UserInputRequest>(`/api/user-input-requests/${id}/cancel`, { method: "POST" }),
   scanWorkspace: (workspaceId: string) => request<Record<string, any>>(`/api/workspaces/${workspaceId}/scan`, { method: "POST" }),
   profile: (workspaceId: string) => request<ProjectProfile>(`/api/workspaces/${workspaceId}/profile`),
   scanRuns: (workspaceId: string) => request<Record<string, any>[]>(`/api/workspaces/${workspaceId}/scan-runs`),
@@ -87,10 +72,6 @@ export const api = {
   createMemory: (workspaceId: string, body: Record<string, any>) =>
     request<ProjectMemoryItem>(`/api/workspaces/${workspaceId}/memory`, { method: "POST", body }),
   memoryProposals: (workspaceId: string) => request<MemoryWriteProposal[]>(`/api/workspaces/${workspaceId}/memory-proposals`),
-  approveMemoryProposal: (id: string) =>
-    request<MemoryWriteProposal>(`/api/memory-proposals/${id}/approve`, { method: "POST", body: { resolvedBy: "web-dashboard" } }),
-  rejectMemoryProposal: (id: string, reason = "Not reusable from web dashboard") =>
-    request<MemoryWriteProposal>(`/api/memory-proposals/${id}/reject`, { method: "POST", body: { resolvedBy: "web-dashboard", reason } }),
   context: (workspaceId: string, q: string, limit = 10) =>
     request<MemoryContext>(`/api/workspaces/${workspaceId}/search-context?q=${encodeURIComponent(q)}&limit=${limit}`),
   symbols: (workspaceId: string, query = "", type = "") =>

@@ -22,6 +22,7 @@ class InteractiveTerminalSession {
     private final CliOutputFormatter formatter;
     private final Scanner scanner = new Scanner(System.in);
     private String workspaceId = "";
+    private String conversationId = "";
     private String taskId = "";
     private String runId = "";
     private int renderedEvents;
@@ -39,7 +40,7 @@ class InteractiveTerminalSession {
 
     void run(String initialPrompt) throws Exception {
         System.out.println("Auditable Agent TUI. Type /status, /workspace, /plan, /diff, /permissions, /resume, /new, /exit.");
-        sessions.append("session_started", workspaceId, taskId, runId, "", "session started");
+        sessions.append("session_started", workspaceId, conversationId, taskId, runId, "", "session started");
         if (initialPrompt != null && !initialPrompt.isBlank()) {
             submitPrompt(initialPrompt);
         }
@@ -74,8 +75,9 @@ class InteractiveTerminalSession {
             case "new" -> {
                 taskId = "";
                 runId = "";
+                conversationId = "";
                 renderedEvents = 0;
-                sessions.append("new", workspaceId, taskId, runId, "", "new conversation");
+                sessions.append("new", workspaceId, conversationId, taskId, runId, "", "new conversation");
                 System.out.println("Started a new conversation in this terminal session.");
                 yield false;
             }
@@ -122,13 +124,20 @@ class InteractiveTerminalSession {
     private void submitPrompt(String prompt) throws Exception {
         var workspaceId = ensureWorkspace();
         var workflow = workflowForPromptAndPermission(config.get("workflow"), prompt);
-        var created = mapper.readTree(cli.post("/api/tasks",
-                Map.of("workspaceId", workspaceId, "title", "CLI interactive task", "userRequest", prompt)));
+        var request = new java.util.LinkedHashMap<String, Object>();
+        request.put("workspaceId", workspaceId);
+        if (conversationId != null && !conversationId.isBlank()) {
+            request.put("conversationId", conversationId);
+        }
+        request.put("title", "CLI interactive task");
+        request.put("userRequest", prompt);
+        var created = mapper.readTree(cli.post("/api/tasks", request));
+        conversationId = created.path("conversationId").asText(conversationId);
         taskId = created.path("id").asText();
-        var run = mapper.readTree(cli.post("/api/tasks/" + taskId + "/start-async?workflow=" + workflow, null));
-        runId = run.path("id").asText();
+        var started = mapper.readTree(cli.post("/api/tasks/" + taskId + "/start-async?workflow=" + workflow, null));
+        runId = taskId;
         renderedEvents = 0;
-        sessions.append("prompt", workspaceId, taskId, runId, run.path("status").asText(), prompt);
+        sessions.append("prompt", workspaceId, conversationId, taskId, runId, started.path("status").asText(), prompt);
         config.save();
         pollUntilBlockedOrDone();
     }
@@ -144,7 +153,7 @@ class InteractiveTerminalSession {
             System.out.print(formatter.timelineUpdate(timeline, renderedEvents));
             renderedEvents = events.isArray() ? events.size() : renderedEvents;
             var status = timeline.path("run").path("status").asText("");
-            sessions.append("timeline", workspaceId, taskId, runId, status, status);
+            sessions.append("timeline", workspaceId, conversationId, taskId, runId, status, status);
             if ("WAITING_APPROVAL".equals(status)) {
                 resolveApproval(timeline);
                 return;
@@ -340,10 +349,11 @@ class InteractiveTerminalSession {
                     Base URL: %s
                     Permission: %s
                     Workspace: %s
+                    Conversation: %s
                     Workspace root: %s
                     Run: none
                     """.formatted(sessions.sessionId(), cli.effectiveBaseUrl(), config.get("permission_preset"),
-                    valueOrUnset(workspaceId), currentWorkspaceRoot()));
+                    valueOrUnset(workspaceId), valueOrUnset(conversationId), currentWorkspaceRoot()));
             return;
         }
         System.out.println(formatter.status(timeline, sessions.sessionId(), cli.effectiveBaseUrl(),
@@ -391,6 +401,7 @@ class InteractiveTerminalSession {
         sessions.use(id);
         taskId = state.getOrDefault("taskId", "");
         runId = state.getOrDefault("runId", "");
+        conversationId = state.getOrDefault("conversationId", "");
         workspaceId = state.getOrDefault("workspaceId", workspaceId);
         renderedEvents = 0;
         System.out.println("Resumed session " + id);
@@ -410,7 +421,7 @@ class InteractiveTerminalSession {
         if (runId == null || runId.isBlank()) {
             return null;
         }
-        return mapper.readTree(cli.get("/api/runs/" + runId + "/timeline"));
+        return mapper.readTree(cli.get("/api/tasks/" + taskId + "/timeline"));
     }
 
     private String ensureWorkspace() throws Exception {

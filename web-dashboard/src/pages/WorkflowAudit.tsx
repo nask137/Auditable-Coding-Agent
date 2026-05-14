@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { WorkflowGraph, type WorkflowGraphEdge, type WorkflowGraphNode } from "../components/WorkflowGraph";
-import { Badge, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorState, Input, Select, Table, Td, Th } from "../components/ui";
+import { Badge, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorState, Select, Table, Td, Th } from "../components/ui";
 import { api } from "../lib/api";
 import { compactId, formatDate } from "../lib/utils";
 import type { WorkflowDefinition, WorkflowEdgeDecision, WorkflowNodeExecution } from "../types";
@@ -9,6 +9,7 @@ import type { WorkflowDefinition, WorkflowEdgeDecision, WorkflowNodeExecution } 
 export function WorkflowAudit() {
   const [runId, setRunId] = useState("");
   const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
+  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
   const [workflowId, setWorkflowId] = useState("");
   const selectedWorkflowId = workflowId || workflows.data?.[0]?.id || "";
   const workflow = useQuery({ queryKey: ["workflow", selectedWorkflowId], queryFn: () => api.workflow(selectedWorkflowId), enabled: Boolean(selectedWorkflowId) });
@@ -52,9 +53,17 @@ export function WorkflowAudit() {
       <Card>
         <CardHeader>
           <CardTitle>运行执行路径</CardTitle>
-          <Input className="w-96" placeholder="运行 ID" value={runId} onChange={(e) => setRunId(e.target.value)} />
+          <Select className="w-96" value={runId} onChange={(e) => setRunId(e.target.value)}>
+            <option value="">选择运行</option>
+            {runs.data?.map((run) => (
+              <option key={run.id} value={run.id}>
+                {compactId(run.id)} · {run.status} · {formatDate(run.startedAt)}
+              </option>
+            ))}
+          </Select>
         </CardHeader>
         <CardContent className="space-y-4">
+          {runs.error ? <ErrorState error={runs.error} /> : null}
           {runWorkflow.data && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span>{runWorkflow.data.name}</span>
@@ -64,7 +73,7 @@ export function WorkflowAudit() {
               {lastNode ? <span className="text-muted-foreground">当前到达 {lastNode.nodeId}</span> : null}
             </div>
           )}
-          {nodes.data?.length ? <WorkflowGraph nodes={executionGraph.nodes} edges={executionGraph.edges} /> : <EmptyState title="输入运行 ID 以可视化执行过程" />}
+          {nodes.data?.length ? <WorkflowGraph nodes={executionGraph.nodes} edges={executionGraph.edges} /> : <EmptyState title="选择运行以可视化执行过程" />}
         </CardContent>
       </Card>
 

@@ -38,12 +38,13 @@ class CliSessionStoreTests {
         var store = new CliSessionStore(new ObjectMapper(), tempDir);
         var sessionId = store.sessionId();
 
-        store.append("timeline", "workspace-1", "task-1", "run-1", "RUNNING", "started");
-        store.append("timeline", "workspace-1", "task-1", "run-1", "COMPLETED", "done");
+        store.append("timeline", "workspace-1", "conversation-1", "task-1", "run-1", "RUNNING", "started");
+        store.append("timeline", "workspace-1", "conversation-1", "task-1", "run-1", "COMPLETED", "done");
 
         assertThat(store.latestSessionId()).isEqualTo(sessionId);
         assertThat(store.lastState(sessionId))
                 .containsEntry("workspaceId", "workspace-1")
+                .containsEntry("conversationId", "conversation-1")
                 .containsEntry("taskId", "task-1")
                 .containsEntry("runId", "run-1")
                 .containsEntry("status", "COMPLETED");

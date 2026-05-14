@@ -29,6 +29,7 @@ export type WorkflowDefinition = {
 export type CodingTask = {
   id: Id;
   workspaceId: Id;
+  title?: string;
   userRequest: string;
   status: string;
   createdAt?: string;
@@ -41,6 +42,7 @@ export type AgentRun = {
   workflowName?: string;
   status: string;
   startedAt?: string;
+  finishedAt?: string;
   completedAt?: string;
   failureReason?: string;
 };
@@ -129,28 +131,6 @@ export type TaskReport = {
   taskId: Id;
   runId: Id;
   contentMd: string;
-  createdAt?: string;
-};
-
-export type ApprovalRequest = Record<string, any> & {
-  id: Id;
-  taskId?: Id;
-  runId?: Id;
-  approvalType?: string;
-  riskLevel?: string;
-  reason?: string;
-  status?: string;
-  preview?: string;
-  createdAt?: string;
-};
-
-export type UserInputRequest = Record<string, any> & {
-  id: Id;
-  taskId?: Id;
-  runId?: Id;
-  status?: string;
-  prompt?: string;
-  answer?: string;
   createdAt?: string;
 };
 

@@ -8,6 +8,7 @@ import java.time.Instant;
 public record CliSessionSummary(
         String sessionId,
         String workspaceId,
+        String conversationId,
         String runId,
         String taskId,
         String status,
