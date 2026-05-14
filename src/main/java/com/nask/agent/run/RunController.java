@@ -39,6 +39,14 @@ public class RunController {
     }
 
     /**
+     * Lists runs for read-only dashboard selectors.
+     */
+    @GetMapping
+    List<AgentRun> list() {
+        return runService.list();
+    }
+
+    /**
      * Fetches run metadata and terminal status.
      */
     @GetMapping("/{runId}")

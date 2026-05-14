@@ -1,16 +1,13 @@
 import { NavLink, Outlet } from "react-router-dom";
 import {
-  Activity,
   Boxes,
   Brain,
   Database,
   GitBranch,
   Home,
-  MessageSquare,
   Monitor,
   RotateCcw,
   Settings,
-  ShieldCheck,
   Workflow
 } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -18,11 +15,8 @@ import { cn } from "../lib/utils";
 const nav = [
   { to: "/", label: "仪表盘", icon: Home },
   { to: "/workspaces", label: "工作区", icon: Database },
-  { to: "/tasks", label: "任务", icon: Activity },
   { to: "/workflow", label: "工作流审计", icon: Workflow },
   { to: "/replay", label: "回放", icon: RotateCcw },
-  { to: "/approvals", label: "审批", icon: ShieldCheck },
-  { to: "/inputs", label: "用户输入", icon: MessageSquare },
   { to: "/memory", label: "记忆", icon: Brain },
   { to: "/context", label: "上下文", icon: GitBranch },
   { to: "/cli-sessions", label: "CLI 会话", icon: Monitor },

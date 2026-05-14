@@ -5,6 +5,7 @@ import com.nask.agent.command.CommandExecutionRepository;
 import com.nask.agent.command.CommandToolService;
 import com.nask.agent.common.AgentSettings;
 import com.nask.agent.common.Domain;
+import com.nask.agent.conversation.ConversationService;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.file.FileToolService;
 import com.nask.agent.git.GitToolService;
@@ -31,6 +32,7 @@ import com.nask.agent.tool.ToolExecutionContext;
 import com.nask.agent.tool.ToolExecutionResult;
 import com.nask.agent.tool.ToolRecordRepository;
 import com.nask.agent.validation.ValidationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -59,10 +61,12 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     private final FailureClassifier failureClassifier;
     private final AgentRunService runService;
     private final UserInputRequestService userInputRequestService;
+    private final ConversationService conversationService;
     private final ProjectMemoryService projectMemoryService;
     private final ProjectContextRetriever projectContextRetriever;
     private final MemoryWriteProposalService memoryWriteProposalService;
 
+    @Autowired
     public AgentWorkflowNodeExecutor(AgentStepService stepService, AgentActionService actionService,
                                      PlanService planService, com.nask.agent.llm.LlmGateway llmGateway,
                                      FileToolService fileToolService, GitToolService gitToolService,
@@ -74,6 +78,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                                      RuntimeFailureService runtimeFailureService,
                                      FailureClassifier failureClassifier, AgentRunService runService,
                                      UserInputRequestService userInputRequestService,
+                                     ConversationService conversationService,
                                      ProjectMemoryService projectMemoryService,
                                      ProjectContextRetriever projectContextRetriever,
                                      MemoryWriteProposalService memoryWriteProposalService) {
@@ -94,9 +99,30 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         this.failureClassifier = failureClassifier;
         this.runService = runService;
         this.userInputRequestService = userInputRequestService;
+        this.conversationService = conversationService;
         this.projectMemoryService = projectMemoryService;
         this.projectContextRetriever = projectContextRetriever;
         this.memoryWriteProposalService = memoryWriteProposalService;
+    }
+
+    public AgentWorkflowNodeExecutor(AgentStepService stepService, AgentActionService actionService,
+                                     PlanService planService, com.nask.agent.llm.LlmGateway llmGateway,
+                                     FileToolService fileToolService, GitToolService gitToolService,
+                                     ReportService reportService, CommandToolService commandToolService,
+                                     ValidationService validationService, AgentSettings settings,
+                                     FileChangeRepository fileChangeRepository,
+                                     CommandExecutionRepository commandExecutionRepository,
+                                     ToolRecordRepository toolRecordRepository,
+                                     RuntimeFailureService runtimeFailureService,
+                                     FailureClassifier failureClassifier, AgentRunService runService,
+                                     UserInputRequestService userInputRequestService,
+                                     ProjectMemoryService projectMemoryService,
+                                     ProjectContextRetriever projectContextRetriever,
+                                     MemoryWriteProposalService memoryWriteProposalService) {
+        this(stepService, actionService, planService, llmGateway, fileToolService, gitToolService, reportService,
+                commandToolService, validationService, settings, fileChangeRepository, commandExecutionRepository,
+                toolRecordRepository, runtimeFailureService, failureClassifier, runService, userInputRequestService,
+                null, projectMemoryService, projectContextRetriever, memoryWriteProposalService);
     }
 
     @Override
@@ -131,7 +157,8 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 Domain.StepType.UNDERSTAND_TASK, "Understand task");
         var understanding = callModelWithRecovery(state, step.id(), null, "understand task",
                 () -> llmGateway.understandTask(new TaskContext(state.task().id(), state.run().id(), step.id(),
-                        state.workspace().id(), state.task().userRequest(), state.recoveryNotes())));
+                        state.workspace().id(), state.task().userRequest(), state.recoveryNotes(),
+                        previousConversationTasks(state))));
         if (understanding == null) {
             stepService.markWaitingUserInput(state.task().id(), state.run().id(), step, "Waiting for user input");
             return NodeExecutionResult.waitingUserInput("Waiting for user input", Map.of("stepId", step.id().toString()));
@@ -503,6 +530,13 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 "Runtime recovery needs guidance for " + failure.failureType(),
                 failure.summary(), List.of("Retry with corrected model output", "Adjust task instructions",
                         "Cancel task"));
+    }
+
+    private List<com.nask.agent.conversation.ConversationTaskContext> previousConversationTasks(AgentState state) {
+        if (conversationService == null) {
+            return List.of();
+        }
+        return conversationService.previousTaskContext(state.task().conversationId(), state.task().id(), 5);
     }
 
     @SuppressWarnings("unchecked")

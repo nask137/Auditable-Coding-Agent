@@ -95,7 +95,7 @@ public class CliRuntimeStateService {
             var node = mapper.readTree(last);
             var file = path.getFileName().toString();
             var id = file.substring(0, file.length() - ".jsonl".length());
-            return new CliSessionSummary(id, text(node, "workspaceId"), text(node, "runId"),
+            return new CliSessionSummary(id, text(node, "workspaceId"), text(node, "conversationId"), text(node, "runId"),
                     text(node, "taskId"), text(node, "status"), Instant.parse(text(node, "timestamp")));
         } catch (Exception e) {
             return null;

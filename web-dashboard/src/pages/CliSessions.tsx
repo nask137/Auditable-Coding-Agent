@@ -37,7 +37,7 @@ export function CliSessions() {
                     <Td>{session.status || "-"}</Td>
                     <Td>{session.workspaceId || "-"}</Td>
                     <Td>{session.taskId || "-"}</Td>
-                    <Td>{session.runId ? <Link className="text-primary underline" to={`/runs/${session.runId}`}>{session.runId}</Link> : "-"}</Td>
+                    <Td>{session.runId ? <Link className="text-primary underline" to={`/runs/${session.runId}${session.taskId ? `?taskId=${session.taskId}` : ""}`}>{session.runId}</Link> : "-"}</Td>
                     <Td>{session.updatedAt || "-"}</Td>
                   </tr>
                 ))}

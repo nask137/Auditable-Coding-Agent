@@ -34,12 +34,19 @@ public class AgentRunRepository {
     }
 
     /**
-     * Inserts a new run.
+     * Starts the single execution attached to the task.
      */
     public AgentRun insert(AgentRun run) {
         jdbc.update("""
-                insert into agent_run (id, task_id, agent_mode, status, started_at, finished_at, failure_reason, runtime_metadata)
-                values (:id, :taskId, :agentMode, :status, :startedAt, :finishedAt, :failureReason, cast(:runtimeMetadata as jsonb))
+                update task
+                   set agent_mode = :agentMode,
+                       status = :status,
+                       execution_started_at = :startedAt,
+                       execution_finished_at = :finishedAt,
+                       failure_reason = :failureReason,
+                       runtime_metadata = cast(:runtimeMetadata as jsonb),
+                       updated_at = :startedAt
+                 where id = :taskId
                 """, params(run));
         return run;
     }
@@ -48,15 +55,58 @@ public class AgentRunRepository {
      * Looks up a run by id.
      */
     public Optional<AgentRun> findById(UUID id) {
-        return jdbc.query("select * from agent_run where id = :id", new MapSqlParameterSource("id", id), mapper())
+        return jdbc.query("""
+                select id,
+                       id as task_id,
+                       coalesce(agent_mode, 'CODE_EDIT') as agent_mode,
+                       status,
+                       coalesce(execution_started_at, updated_at) as started_at,
+                       execution_finished_at as finished_at,
+                       failure_reason,
+                       runtime_metadata
+                  from task
+                 where id = :id
+                """, new MapSqlParameterSource("id", id), mapper())
                 .stream().findFirst();
+    }
+
+    /**
+     * Lists all runs newest first for read-only dashboard selection.
+     */
+    public List<AgentRun> findAll() {
+        return jdbc.query("""
+                select id,
+                       id as task_id,
+                       coalesce(agent_mode, 'CODE_EDIT') as agent_mode,
+                       status,
+                       coalesce(execution_started_at, updated_at) as started_at,
+                       execution_finished_at as finished_at,
+                       failure_reason,
+                       runtime_metadata
+                  from task
+                 where execution_started_at is not null
+                 order by execution_started_at desc, id
+                """, mapper());
     }
 
     /**
      * Lists all runs for a task, newest first.
      */
     public List<AgentRun> findByTask(UUID taskId) {
-        return jdbc.query("select * from agent_run where task_id = :taskId order by started_at desc",
+        return jdbc.query("""
+                select id,
+                       id as task_id,
+                       coalesce(agent_mode, 'CODE_EDIT') as agent_mode,
+                       status,
+                       coalesce(execution_started_at, updated_at) as started_at,
+                       execution_finished_at as finished_at,
+                       failure_reason,
+                       runtime_metadata
+                  from task
+                 where id = :taskId
+                   and execution_started_at is not null
+                 order by execution_started_at desc, id
+                """,
                 new MapSqlParameterSource("taskId", taskId), mapper());
     }
 
@@ -65,10 +115,11 @@ public class AgentRunRepository {
      */
     public void updateStatus(UUID id, Domain.AgentRunStatus status, String failureReason) {
         jdbc.update("""
-                update agent_run
+                update task
                    set status = :status,
                        failure_reason = :failureReason,
-                       finished_at = case when :finished then :finishedAt else finished_at end
+                       execution_finished_at = case when :finished then :finishedAt else execution_finished_at end,
+                       updated_at = :updatedAt
                  where id = :id
                 """, new MapSqlParameterSource()
                 .addValue("id", id)
@@ -77,7 +128,8 @@ public class AgentRunRepository {
                 .addValue("finished", status == Domain.AgentRunStatus.COMPLETED
                         || status == Domain.AgentRunStatus.FAILED
                         || status == Domain.AgentRunStatus.CANCELLED)
-                .addValue("finishedAt", ts(Instant.now())));
+                .addValue("finishedAt", ts(Instant.now()))
+                .addValue("updatedAt", ts(Instant.now())));
     }
 
     private MapSqlParameterSource params(AgentRun run) {

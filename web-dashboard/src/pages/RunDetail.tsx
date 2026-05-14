@@ -9,8 +9,8 @@ import { compactId, formatDate } from "../lib/utils";
 export function RunDetail() {
   const { runId = "" } = useParams();
   const [search] = useSearchParams();
-  const taskId = search.get("taskId") ?? "";
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.run(runId), enabled: Boolean(runId), refetchInterval: 8000 });
+  const taskId = search.get("taskId") ?? run.data?.taskId ?? "";
   const plan = useQuery({ queryKey: ["plan", runId], queryFn: () => api.runPlan(runId), enabled: Boolean(runId), retry: false });
   const steps = useQuery({ queryKey: ["steps", runId], queryFn: () => api.runSteps(runId), enabled: Boolean(runId), retry: false });
   const nodes = useQuery({ queryKey: ["workflow-nodes", runId], queryFn: () => api.runWorkflowNodes(runId), enabled: Boolean(runId), retry: false });

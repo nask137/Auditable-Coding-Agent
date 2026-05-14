@@ -28,9 +28,12 @@ public class LlmPromptFactory {
                 User request:
                 %s
 
+                Previous tasks in this conversation:
+                %s
+
                 Runtime recovery notes:
                 %s
-                """.formatted(context.userRequest(), context.recoveryNotes()));
+                """.formatted(context.userRequest(), conversationHistory(context), context.recoveryNotes()));
     }
 
     public LlmPrompt planDraft(PlanningContext context) {
@@ -233,5 +236,28 @@ public class LlmPromptFactory {
                 .toList();
         return "Retrieval %s: %s%nProfile: %s%nResults:%n%s".formatted(
                 context.retrievalId(), context.summary(), profile, String.join("\n", results));
+    }
+
+    private String conversationHistory(TaskContext context) {
+        if (context.previousTasks() == null || context.previousTasks().isEmpty()) {
+            return "No earlier tasks in this conversation.";
+        }
+        return context.previousTasks().stream()
+                .map(task -> """
+                        - Task %s [%s]
+                          Prompt: %s
+                          Final report: %s
+                          Affected files: %s
+                        """.formatted(task.taskId(), task.status(), compact(task.prompt(), 500),
+                        compact(task.finalReport(), 800), task.affectedFiles()))
+                .collect(java.util.stream.Collectors.joining("\n"));
+    }
+
+    private String compact(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return "(none)";
+        }
+        var normalized = value.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength - 3) + "...";
     }
 }

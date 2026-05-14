@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -45,13 +46,17 @@ public class AgentRunService {
      */
     @Transactional
     public AgentRun createRun(CodingTask task, String workflowName) {
+        if (!Domain.TaskStatus.CREATED.name().equals(task.status())) {
+            throw new ApiException(HttpStatus.CONFLICT, "TASK_ALREADY_EXECUTED",
+                    "Task can only be started once: " + task.id());
+        }
         var workflow = workflowName == null || workflowName.isBlank() ? "coding-agent" : workflowName;
         var mode = switch (workflow) {
             case "review-agent" -> "REVIEW";
             case "test-agent" -> "TEST";
             default -> "CODE_EDIT";
         };
-        var run = new AgentRun(UUID.randomUUID(), task.id(), mode, Domain.AgentRunStatus.RUNNING.name(),
+        var run = new AgentRun(task.id(), task.id(), mode, Domain.AgentRunStatus.RUNNING.name(),
                 Instant.now(), null, null, Map.of("loop", "phase3-workflow", "workflow", workflow));
         repository.insert(run);
         taskService.updateStatus(task.id(), Domain.TaskStatus.RUNNING);
@@ -66,6 +71,13 @@ public class AgentRunService {
     public AgentRun getRequired(UUID id) {
         return repository.findById(id).orElseThrow(() ->
                 new ApiException(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", "AgentRun not found: " + id));
+    }
+
+    /**
+     * Lists existing runs for observation clients.
+     */
+    public List<AgentRun> list() {
+        return repository.findAll();
     }
 
     /**
