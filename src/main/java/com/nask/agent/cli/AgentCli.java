@@ -1,5 +1,6 @@
 package com.nask.agent.cli;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import picocli.CommandLine;
 
@@ -126,6 +127,10 @@ public class AgentCli implements Callable<Integer> {
         return new CliOutputFormatter(mapper, rawJson).json(body);
     }
 
+    JsonNode read(String body) throws Exception {
+        return mapper.readTree(body);
+    }
+
     private void requireSuccess(HttpResponse<String> response) {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IllegalStateException("HTTP " + response.statusCode() + ": " + response.body());
@@ -135,7 +140,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Starts the interactive terminal session explicitly.
      */
-    @CommandLine.Command(name = "tui")
+    @CommandLine.Command(name = "tui", mixinStandardHelpOptions = true)
     static class TuiCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(arity = "0..*", description = "Initial prompt") List<String> prompt = List.of();
@@ -151,7 +156,8 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Parent command for workspace operations.
      */
-    @CommandLine.Command(name = "workspace", subcommands = {WorkspaceAdd.class, WorkspaceList.class})
+    @CommandLine.Command(name = "workspace", mixinStandardHelpOptions = true,
+            subcommands = {WorkspaceAdd.class, WorkspaceList.class})
     static class WorkspaceCommand implements Callable<Integer> {
         /**
          * Shows workspace subcommand usage.
@@ -166,7 +172,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Registers a workspace root with the service.
      */
-    @CommandLine.Command(name = "add")
+    @CommandLine.Command(name = "add", mixinStandardHelpOptions = true)
     static class WorkspaceAdd implements Callable<Integer> {
         @CommandLine.ParentCommand WorkspaceCommand parent;
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
@@ -186,7 +192,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists registered workspaces.
      */
-    @CommandLine.Command(name = "list")
+    @CommandLine.Command(name = "list", mixinStandardHelpOptions = true)
     static class WorkspaceList implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
 
@@ -204,7 +210,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Creates a task and starts a run.
      */
-    @CommandLine.Command(name = "run")
+    @CommandLine.Command(name = "run", mixinStandardHelpOptions = true)
     static class RunCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String task;
@@ -227,7 +233,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists workflow definitions.
      */
-    @CommandLine.Command(name = "workflows")
+    @CommandLine.Command(name = "workflows", mixinStandardHelpOptions = true)
     static class WorkflowsCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
 
@@ -242,7 +248,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays one workflow definition.
      */
-    @CommandLine.Command(name = "workflow")
+    @CommandLine.Command(name = "workflow", mixinStandardHelpOptions = true)
     static class WorkflowCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workflowId;
@@ -258,7 +264,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays the workflow definition selected by a run.
      */
-    @CommandLine.Command(name = "workflow-status")
+    @CommandLine.Command(name = "workflow-status", mixinStandardHelpOptions = true)
     static class WorkflowStatusCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String runId;
@@ -274,7 +280,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays workflow node and edge history for a run.
      */
-    @CommandLine.Command(name = "workflow-path")
+    @CommandLine.Command(name = "workflow-path", mixinStandardHelpOptions = true)
     static class WorkflowPathCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String runId;
@@ -282,8 +288,15 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.format(root.get("/api/runs/" + runId + "/workflow/nodes")));
-            System.out.println(root.format(root.get("/api/runs/" + runId + "/workflow/edges")));
+            var nodes = root.get("/api/runs/" + runId + "/workflow/nodes");
+            var edges = root.get("/api/runs/" + runId + "/workflow/edges");
+            if (root.rawJson) {
+                System.out.println(nodes);
+                System.out.println(edges);
+            } else {
+                System.out.println(new CliOutputFormatter(root.mapper, false)
+                        .workflowPath(root.read(nodes), root.read(edges)));
+            }
             return 0;
         }
     }
@@ -291,7 +304,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Triggers a bounded project scan for a workspace.
      */
-    @CommandLine.Command(name = "scan")
+    @CommandLine.Command(name = "scan", mixinStandardHelpOptions = true)
     static class ScanCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -307,7 +320,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays the latest project profile for a workspace.
      */
-    @CommandLine.Command(name = "profile")
+    @CommandLine.Command(name = "profile", mixinStandardHelpOptions = true)
     static class ProfileCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -323,7 +336,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Searches indexed code symbols for a workspace.
      */
-    @CommandLine.Command(name = "symbols")
+    @CommandLine.Command(name = "symbols", mixinStandardHelpOptions = true)
     static class SymbolsCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -342,7 +355,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays indexed symbols for one workspace-relative file.
      */
-    @CommandLine.Command(name = "outline")
+    @CommandLine.Command(name = "outline", mixinStandardHelpOptions = true)
     static class OutlineCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -359,7 +372,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Retrieves project context using the unified memory search service.
      */
-    @CommandLine.Command(name = "context")
+    @CommandLine.Command(name = "context", mixinStandardHelpOptions = true)
     static class ContextCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -383,7 +396,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists project memory items for a workspace.
      */
-    @CommandLine.Command(name = "memory")
+    @CommandLine.Command(name = "memory", mixinStandardHelpOptions = true)
     static class MemoryCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -399,7 +412,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Manually records an approved project memory item.
      */
-    @CommandLine.Command(name = "remember")
+    @CommandLine.Command(name = "remember", mixinStandardHelpOptions = true)
     static class RememberCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -434,7 +447,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists memory write proposals for a workspace.
      */
-    @CommandLine.Command(name = "memory-proposals")
+    @CommandLine.Command(name = "memory-proposals", mixinStandardHelpOptions = true)
     static class MemoryProposalsCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -450,7 +463,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Approves a memory write proposal.
      */
-    @CommandLine.Command(name = "memory-approve")
+    @CommandLine.Command(name = "memory-approve", mixinStandardHelpOptions = true)
     static class MemoryApproveCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String proposalId;
@@ -467,7 +480,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Rejects a memory write proposal.
      */
-    @CommandLine.Command(name = "memory-reject")
+    @CommandLine.Command(name = "memory-reject", mixinStandardHelpOptions = true)
     static class MemoryRejectCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String proposalId;
@@ -485,7 +498,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists persisted memory retrieval records for a workspace.
      */
-    @CommandLine.Command(name = "memory-retrievals")
+    @CommandLine.Command(name = "memory-retrievals", mixinStandardHelpOptions = true)
     static class MemoryRetrievalsCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String workspaceId;
@@ -501,7 +514,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays task status.
      */
-    @CommandLine.Command(name = "status")
+    @CommandLine.Command(name = "status", mixinStandardHelpOptions = true)
     static class StatusCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String taskId;
@@ -512,7 +525,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.format(root.get("/api/tasks/" + taskId)));
+            var body = root.get("/api/tasks/" + taskId);
+            System.out.println(root.rawJson ? body : new CliOutputFormatter(root.mapper, false).taskStatus(root.read(body)));
             return 0;
         }
     }
@@ -520,7 +534,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays task audit events.
      */
-    @CommandLine.Command(name = "events")
+    @CommandLine.Command(name = "events", mixinStandardHelpOptions = true)
     static class EventsCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String taskId;
@@ -531,7 +545,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/events")));
+            var body = root.get("/api/tasks/" + taskId + "/events");
+            System.out.println(root.rawJson ? body : new CliOutputFormatter(root.mapper, false).events(root.read(body)));
             return 0;
         }
     }
@@ -539,7 +554,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays task runtime failures.
      */
-    @CommandLine.Command(name = "failures")
+    @CommandLine.Command(name = "failures", mixinStandardHelpOptions = true)
     static class FailuresCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String taskId;
@@ -547,7 +562,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/failures")));
+            var body = root.get("/api/tasks/" + taskId + "/failures");
+            System.out.println(root.rawJson ? body : new CliOutputFormatter(root.mapper, false).failures(root.read(body)));
             return 0;
         }
     }
@@ -555,7 +571,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays recorded file changes.
      */
-    @CommandLine.Command(name = "diff")
+    @CommandLine.Command(name = "diff", mixinStandardHelpOptions = true)
     static class DiffCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String taskId;
@@ -566,7 +582,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/changes")));
+            var body = root.get("/api/tasks/" + taskId + "/changes");
+            System.out.println(root.rawJson ? body : new CliOutputFormatter(root.mapper, false).changes(root.read(body)));
             return 0;
         }
     }
@@ -574,7 +591,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays the latest task report.
      */
-    @CommandLine.Command(name = "report")
+    @CommandLine.Command(name = "report", mixinStandardHelpOptions = true)
     static class ReportCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String taskId;
@@ -585,7 +602,8 @@ public class AgentCli implements Callable<Integer> {
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/report")));
+            var body = root.get("/api/tasks/" + taskId + "/report");
+            System.out.println(root.rawJson ? body : new CliOutputFormatter(root.mapper, false).report(root.read(body)));
             return 0;
         }
     }
@@ -593,7 +611,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists pending approval requests.
      */
-    @CommandLine.Command(name = "approvals")
+    @CommandLine.Command(name = "approvals", mixinStandardHelpOptions = true)
     static class ApprovalsCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
 
@@ -611,7 +629,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Approves an approval request.
      */
-    @CommandLine.Command(name = "approve")
+    @CommandLine.Command(name = "approve", mixinStandardHelpOptions = true)
     static class ApproveCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String approvalId;
@@ -630,7 +648,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Denies an approval request.
      */
-    @CommandLine.Command(name = "deny")
+    @CommandLine.Command(name = "deny", mixinStandardHelpOptions = true)
     static class DenyCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String approvalId;
@@ -649,7 +667,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists pending user-input requests.
      */
-    @CommandLine.Command(name = "inputs")
+    @CommandLine.Command(name = "inputs", mixinStandardHelpOptions = true)
     static class InputsCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
 
@@ -664,7 +682,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Displays one user-input request.
      */
-    @CommandLine.Command(name = "input")
+    @CommandLine.Command(name = "input", mixinStandardHelpOptions = true)
     static class InputCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String requestId;
@@ -680,7 +698,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Answers a pending user-input request and resumes the run.
      */
-    @CommandLine.Command(name = "answer")
+    @CommandLine.Command(name = "answer", mixinStandardHelpOptions = true)
     static class AnswerCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String requestId;
@@ -697,7 +715,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Cancels a pending user-input request and fails the run.
      */
-    @CommandLine.Command(name = "cancel-input")
+    @CommandLine.Command(name = "cancel-input", mixinStandardHelpOptions = true)
     static class CancelInputCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String requestId;
@@ -713,7 +731,8 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Parent command for command policy operations.
      */
-    @CommandLine.Command(name = "command", subcommands = {CommandAllow.class, CommandList.class})
+    @CommandLine.Command(name = "command", mixinStandardHelpOptions = true,
+            subcommands = {CommandAllow.class, CommandList.class})
     static class CommandPolicyCommand implements Callable<Integer> {
         /**
          * Shows command-policy subcommand usage.
@@ -728,7 +747,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Adds an allowlist command policy.
      */
-    @CommandLine.Command(name = "allow")
+    @CommandLine.Command(name = "allow", mixinStandardHelpOptions = true)
     static class CommandAllow implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Option(names = "--workspace", required = true) String workspaceId;
@@ -751,7 +770,7 @@ public class AgentCli implements Callable<Integer> {
     /**
      * Lists command policies for a workspace.
      */
-    @CommandLine.Command(name = "list")
+    @CommandLine.Command(name = "list", mixinStandardHelpOptions = true)
     static class CommandList implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Option(names = "--workspace", required = true) String workspaceId;

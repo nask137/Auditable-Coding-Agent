@@ -174,7 +174,6 @@ class Phase1ApiIntegrationTests {
                 "trusted", true));
         var workspaceId = workspace.get("id").toString();
         var taskId = UUID.randomUUID();
-        var runId = taskId;
         jdbc.update("""
                 insert into task (
                   id, workspace_id, title, user_request, status, agent_mode,
@@ -186,7 +185,7 @@ class Phase1ApiIntegrationTests {
         jdbc.update("""
                 insert into task_report (id, task_id, run_id, content_md, created_at)
                 values (?, ?, ?, '## Historical Report\n\nUse mvn test for validation.', now())
-                """, UUID.randomUUID(), taskId, runId);
+                """, UUID.randomUUID(), taskId, taskId);
 
         var scan = post("/api/workspaces/" + workspaceId + "/scan", null);
         assertThat(scan.get("status")).isEqualTo("COMPLETED");
