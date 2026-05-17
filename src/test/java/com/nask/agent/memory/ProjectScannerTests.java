@@ -3,6 +3,7 @@ package com.nask.agent.memory;
 import com.nask.agent.TestFiles;
 import com.nask.agent.common.AgentSettings;
 import com.nask.agent.workspace.Workspace;
+import com.nask.agent.workspace.WorkspaceIgnoreService;
 import com.nask.agent.workspace.WorkspacePathGuard;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,9 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ProjectScannerTests {
     private Path workspaceDir;
@@ -33,7 +37,10 @@ class ProjectScannerTests {
         Files.writeString(workspaceDir.resolve("large.properties"), "x".repeat(64));
         var settings = new AgentSettings(10, 20, 5, 300, 3, 2, 2, 3, 120, 200000,
                 2000, 16, 128);
-        var scanner = new ProjectScanner(new WorkspacePathGuard(), settings, new FileClassifier());
+        var ignoreService = mock(WorkspaceIgnoreService.class);
+        when(ignoreService.ignoreView(any())).thenReturn(new WorkspaceIgnoreService.IgnoreView(
+                List.of("target/generated/Ignored.java/"), "test", 0));
+        var scanner = new ProjectScanner(new WorkspacePathGuard(), ignoreService, settings, new FileClassifier());
 
         var result = scanner.scan(workspace());
 
@@ -54,7 +61,9 @@ class ProjectScannerTests {
         Files.writeString(workspaceDir.resolve("c.properties"), "c");
         var settings = new AgentSettings(10, 20, 5, 300, 3, 2, 2, 3, 120, 200000,
                 2, 1024, 4096);
-        var scanner = new ProjectScanner(new WorkspacePathGuard(), settings, new FileClassifier());
+        var ignoreService = mock(WorkspaceIgnoreService.class);
+        when(ignoreService.ignoreView(any())).thenReturn(new WorkspaceIgnoreService.IgnoreView(List.of(), "test", 0));
+        var scanner = new ProjectScanner(new WorkspacePathGuard(), ignoreService, settings, new FileClassifier());
 
         var result = scanner.scan(workspace());
 

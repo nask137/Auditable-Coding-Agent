@@ -40,6 +40,14 @@ class InteractiveTerminalSession {
 
     void run(String initialPrompt) throws Exception {
         System.out.println("Auditable Agent TUI. Type /status, /workspace, /plan, /diff, /permissions, /resume, /new, /exit.");
+        try {
+            initializeWorkspace();
+        } catch (IllegalStateException e) {
+            System.out.println("Request failed: " + e.getMessage());
+        } catch (java.net.ConnectException e) {
+            System.out.println("Cannot connect to " + cli.effectiveBaseUrl()
+                    + ". Start the backend service or update --base-url.");
+        }
         sessions.append("session_started", workspaceId, conversationId, taskId, taskId, "", "session started");
         if (initialPrompt != null && !initialPrompt.isBlank()) {
             try {
@@ -152,6 +160,13 @@ class InteractiveTerminalSession {
         sessions.append("prompt", workspaceId, conversationId, taskId, taskId, started.path("status").asText(), prompt);
         config.save();
         pollUntilBlockedOrDone();
+    }
+
+    String initializeWorkspace() throws Exception {
+        if (!isUuid(workspaceId)) {
+            workspaceId = resolveOrRegisterCurrentWorkspace();
+        }
+        return workspaceId;
     }
 
     private void pollUntilBlockedOrDone() throws Exception {
@@ -435,24 +450,20 @@ class InteractiveTerminalSession {
         if (isUuid(workspaceId)) {
             return workspaceId;
         }
+        workspaceId = resolveOrRegisterCurrentWorkspace();
+        return workspaceId;
+    }
+
+    private String resolveOrRegisterCurrentWorkspace() throws Exception {
         var root = currentWorkspaceRoot();
         var workspaces = mapper.readTree(cli.get("/api/workspaces"));
         var registered = findWorkspaceIdByRoot(workspaces, root);
         if (registered != null) {
-            workspaceId = registered;
-            return workspaceId;
+            return registered;
         }
-        while (true) {
-            System.out.print("Trust and register this directory as a workspace? " + root + " [y/N] ");
-            var answer = scanner.nextLine().strip();
-            if ("y".equalsIgnoreCase(answer) || "yes".equalsIgnoreCase(answer)) {
-                var created = mapper.readTree(cli.post("/api/workspaces",
-                        Map.of("rootPath", root.toString(), "trusted", true)));
-                workspaceId = created.path("id").asText();
-                return workspaceId;
-            }
-            System.out.println("Workspace registration is required before submitting a task from this directory.");
-        }
+        var created = mapper.readTree(cli.post("/api/workspaces",
+                Map.of("rootPath", root.toString(), "trusted", true)));
+        return created.path("id").asText();
     }
 
     static String findWorkspaceIdByRoot(JsonNode workspaces, Path root) {
@@ -502,7 +513,18 @@ class InteractiveTerminalSession {
                 || text.contains("summarize")
                 || text.contains("summary")
                 || text.contains("bug")
+                || text.contains("explain")
+                || text.contains("describe")
                 || text.contains("总结")
+                || text.contains("查看")
+                || text.contains("看一下")
+                || text.contains("说一下")
+                || text.contains("介绍")
+                || text.contains("特点")
+                || text.contains("是什么")
+                || text.contains("解释")
+                || text.contains("为什么")
+                || text.contains("原因")
                 || text.contains("明显的问题")
                 || text.contains("明显bug")
                 || text.contains("明显的bug")

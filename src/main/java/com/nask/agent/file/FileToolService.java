@@ -11,20 +11,23 @@ import com.nask.agent.tool.ToolExecutionContext;
 import com.nask.agent.tool.ToolExecutionResult;
 import com.nask.agent.tool.ToolRecordRepository;
 import com.nask.agent.workspace.PathCheck;
+import com.nask.agent.workspace.WorkspaceIgnoreService;
 import com.nask.agent.workspace.WorkspacePathGuard;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Stream;
 
 /**
  * Tool service for audited workspace file operations.
@@ -41,6 +44,7 @@ public class FileToolService {
             "pnpm-lock.yaml", "yarn.lock", "Dockerfile", "docker-compose.yml");
 
     private final WorkspacePathGuard pathGuard;
+    private final WorkspaceIgnoreService ignoreService;
     private final PermissionService permissionService;
     private final ApprovalService approvalService;
     private final ToolRecordRepository toolRecords;
@@ -52,11 +56,13 @@ public class FileToolService {
     /**
      * Creates a file tool service.
      */
-    public FileToolService(WorkspacePathGuard pathGuard, PermissionService permissionService,
+    public FileToolService(WorkspacePathGuard pathGuard, WorkspaceIgnoreService ignoreService,
+                           PermissionService permissionService,
                            ApprovalService approvalService, ToolRecordRepository toolRecords,
                            FileChangeRepository fileChanges, AuditService auditService,
                            DiffSupport diffSupport, AgentSettings settings) {
         this.pathGuard = pathGuard;
+        this.ignoreService = ignoreService;
         this.permissionService = permissionService;
         this.approvalService = approvalService;
         this.toolRecords = toolRecords;
@@ -81,20 +87,58 @@ public class FileToolService {
             }
             var root = check.absolutePath();
             var files = new ArrayList<String>();
-            try (Stream<Path> walk = Files.walk(root, Math.max(1, maxDepth))) {
-                // The walk is capped and then each file is re-checked through the
-                // permission service, so broad listings do not leak sensitive paths.
-                walk.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
-                        .sorted(Comparator.comparing(Path::toString))
-                        .limit(500)
-                        .forEach(p -> addIfReadable(context, p, files));
-            }
-            completeTool(call.id(), true, "Listed " + files.size() + " files", Map.of("files", files, "truncated", files.size() >= 500), null);
+            var ignoreView = ignoreService.ignoreView(context.workspace());
+            walkReadableFiles(context, root, Math.max(1, maxDepth), files, ignoreView.ignoredPrefixes());
+            files.sort(String::compareTo);
+            completeTool(call.id(), true, "Listed " + files.size() + " files", Map.of("files", files,
+                    "truncated", files.size() >= 500, "ignoreSource", ignoreView.source(),
+                    "ignoredPrefixes", ignoreView.ignoredPrefixes()), null);
             return ToolExecutionResult.success("Listed " + files.size() + " files", Map.of("files", files));
         } catch (Exception e) {
             failTool(call.id(), e.getMessage());
             return ToolExecutionResult.blocked(e.getMessage());
         }
+    }
+
+    private void walkReadableFiles(ToolExecutionContext context, Path root, int maxDepth, List<String> files,
+                                   List<String> ignoredPrefixes) throws IOException {
+        Files.walkFileTree(root, java.util.Set.of(), maxDepth, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                if (!dir.equals(root) && shouldSkipDirectory(context, root, dir, ignoredPrefixes)) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (attrs.isRegularFile()) {
+                    addIfReadable(context, file, files);
+                }
+                return files.size() >= 500 ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private boolean shouldSkipDirectory(ToolExecutionContext context, Path root, Path dir, List<String> ignoredPrefixes) {
+        var relative = root.relativize(dir.toAbsolutePath().normalize()).toString().replace('\\', '/');
+        var check = pathGuard.check(context.workspace(), relative, false);
+        if (!check.allowed()) {
+            return true;
+        }
+        var prefix = relative.endsWith("/") ? relative : relative + "/";
+        for (var ignoredPrefix : ignoredPrefixes) {
+            if (ignoredPrefix.equals(prefix) || ignoredPrefix.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

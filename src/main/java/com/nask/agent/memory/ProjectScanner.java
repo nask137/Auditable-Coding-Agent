@@ -2,6 +2,7 @@ package com.nask.agent.memory;
 
 import com.nask.agent.common.AgentSettings;
 import com.nask.agent.workspace.Workspace;
+import com.nask.agent.workspace.WorkspaceIgnoreService;
 import com.nask.agent.workspace.WorkspacePathException;
 import com.nask.agent.workspace.WorkspacePathGuard;
 import org.springframework.stereotype.Component;
@@ -24,15 +25,15 @@ import java.util.Map;
  */
 @Component
 public class ProjectScanner {
-    private static final List<String> IGNORED_DIRECTORIES = List.of(
-            ".git", "target", "node_modules", ".idea", ".vscode", "build", "out");
-
     private final WorkspacePathGuard pathGuard;
+    private final WorkspaceIgnoreService ignoreService;
     private final AgentSettings settings;
     private final FileClassifier fileClassifier;
 
-    public ProjectScanner(WorkspacePathGuard pathGuard, AgentSettings settings, FileClassifier fileClassifier) {
+    public ProjectScanner(WorkspacePathGuard pathGuard, WorkspaceIgnoreService ignoreService,
+                          AgentSettings settings, FileClassifier fileClassifier) {
         this.pathGuard = pathGuard;
+        this.ignoreService = ignoreService;
         this.settings = settings;
         this.fileClassifier = fileClassifier;
     }
@@ -49,14 +50,16 @@ public class ProjectScanner {
         if (!Files.isDirectory(root)) {
             throw new WorkspacePathException("Workspace root is not a directory: " + rootCheck.relativePath());
         }
-        var state = new ScanState(root);
+        var ignoreView = ignoreService.ignoreView(workspace);
+        var state = new ScanState(workspace, root, ignoreView);
         try {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                    if (!dir.equals(root) && shouldSkipDirectory(dir.getFileName().toString())) {
+                    if (!dir.equals(root) && state.shouldSkipDirectory(dir)) {
                         state.filesSkipped++;
-                        state.skippedReasons.merge("ignored_directory:" + dir.getFileName(), 1, Integer::sum);
+                        state.skippedReasons.merge("ignored_directory:" + root.relativize(dir)
+                                .toString().replace('\\', '/'), 1, Integer::sum);
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     return state.filesSeen >= settings.projectScanMaxFiles()
@@ -84,7 +87,8 @@ public class ProjectScanner {
                 + "; skipped " + state.filesSkipped;
         return new ProjectScanResult(List.copyOf(state.observations), state.filesSeen, state.observations.size(),
                 state.filesSkipped, summary, Map.of(
-                "ignoredDirectories", IGNORED_DIRECTORIES,
+                "ignoreSource", ignoreView.source(),
+                "ignoredPrefixes", ignoreView.ignoredPrefixes(),
                 "maxFiles", settings.projectScanMaxFiles(),
                 "maxFileBytes", settings.projectScanMaxFileBytes(),
                 "maxTotalBytes", settings.projectScanMaxTotalBytes(),
@@ -92,20 +96,35 @@ public class ProjectScanner {
                 "skippedReasons", state.skippedReasons));
     }
 
-    private boolean shouldSkipDirectory(String directoryName) {
-        return IGNORED_DIRECTORIES.contains(directoryName);
-    }
-
     private final class ScanState {
+        private final Workspace workspace;
         private final Path root;
+        private final WorkspaceIgnoreService.IgnoreView ignoreView;
         private final List<ProjectScanObservation> observations = new ArrayList<>();
         private final Map<String, Integer> skippedReasons = new LinkedHashMap<>();
         private int filesSeen;
         private int filesSkipped;
         private long bytesRead;
 
-        private ScanState(Path root) {
+        private ScanState(Workspace workspace, Path root, WorkspaceIgnoreService.IgnoreView ignoreView) {
+            this.workspace = workspace;
             this.root = root;
+            this.ignoreView = ignoreView;
+        }
+
+        private boolean shouldSkipDirectory(Path dir) {
+            var relative = root.relativize(dir.toAbsolutePath().normalize()).toString().replace('\\', '/');
+            var check = pathGuard.check(workspace, relative, false);
+            if (!check.allowed()) {
+                return true;
+            }
+            var prefix = relative.endsWith("/") ? relative : relative + "/";
+            for (var ignoredPrefix : ignoreView.ignoredPrefixes()) {
+                if (ignoredPrefix.equals(prefix) || ignoredPrefix.startsWith(prefix)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void observe(Path file, BasicFileAttributes attrs) {

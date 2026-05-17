@@ -247,13 +247,17 @@ public class LlmPromptFactory {
                 Recent tool observations:
                 %s
 
+                Project context:
+                %s
+
                 Changed files:
                 %s
 
                 Previous prompts in this conversation, newest first:
                 %s
                 """.formatted(context.taskSummary(), context.resultSummary(), context.workflowSummaries(),
-                context.recentToolObservations(), context.changedFiles(), context.previousConversationPrompts()));
+                context.recentToolObservations(), context.projectContext(), context.changedFiles(),
+                context.previousConversationPrompts()));
     }
 
     private String memorySummary(com.nask.agent.memory.MemoryContext context) {

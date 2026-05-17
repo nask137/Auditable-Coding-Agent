@@ -8,9 +8,10 @@ import java.util.List;
  */
 public record ReportContext(UUID taskId, UUID runId, String taskSummary, String resultSummary,
                             List<String> workflowSummaries, List<String> changedFiles,
-                            List<String> previousConversationPrompts, List<String> recentToolObservations) {
+                            List<String> previousConversationPrompts, List<String> recentToolObservations,
+                            List<String> projectContext) {
     public ReportContext(UUID taskId, UUID runId, String taskSummary, String resultSummary) {
-        this(taskId, runId, taskSummary, resultSummary, List.of(), List.of(), List.of(), List.of());
+        this(taskId, runId, taskSummary, resultSummary, List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     public ReportContext {
@@ -19,5 +20,6 @@ public record ReportContext(UUID taskId, UUID runId, String taskSummary, String 
         previousConversationPrompts = previousConversationPrompts == null
                 ? List.of() : List.copyOf(previousConversationPrompts);
         recentToolObservations = recentToolObservations == null ? List.of() : List.copyOf(recentToolObservations);
+        projectContext = projectContext == null ? List.of() : List.copyOf(projectContext);
     }
 }
