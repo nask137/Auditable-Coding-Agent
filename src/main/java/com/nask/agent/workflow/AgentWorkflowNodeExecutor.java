@@ -301,9 +301,19 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                     state.run().id(), command.stepId(), command.actionId(), state.workspace()), command);
             return finishValidationResult(state, step.id(), result);
         }
+        var changedFiles = changedFilesForRun(state);
+        if (!requiresValidation(state, changedFiles)) {
+            if (state.plan() != null) {
+                planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
+            }
+            return NodeExecutionResult.success("Skipped validation because this run made no file changes", Map.of(
+                    "changedFiles", changedFiles));
+        }
         var decision = callModelWithRecovery(state, null, null, "suggest validation",
                 () -> llmGateway.suggestValidation(new ValidationContext(state.task().id(), state.run().id(),
-                        state.workspace().id(), state.recoveryNotes(), state.memoryContext())));
+                        state.workspace().id(), state.recoveryNotes(), state.memoryContext(),
+                        string(state.transientValue("taskType"), state.run().agentMode()),
+                        state.task().userRequest(), changedFiles, recentCommandsForRun(state))));
         if (decision == null) {
             return NodeExecutionResult.waitingUserInput("Waiting for user input");
         }
@@ -326,6 +336,47 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             return NodeExecutionResult.waitingApproval(result.summary(), Map.of("stepId", step.id().toString()));
         }
         return finishValidationResult(state, step.id(), result);
+    }
+
+    private boolean requiresValidation(AgentState state, List<String> changedFiles) {
+        if (Domain.WorkflowMode.TEST.name().equals(state.workflow().mode())) {
+            return true;
+        }
+        var taskType = string(state.transientValue("taskType"), state.run().agentMode());
+        if ("TEST".equalsIgnoreCase(taskType)) {
+            return true;
+        }
+        return !changedFiles.isEmpty() || explicitlyAskedForValidation(state.task().userRequest());
+    }
+
+    private boolean explicitlyAskedForValidation(String request) {
+        if (request == null) {
+            return false;
+        }
+        var lower = request.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("run test")
+                || lower.contains("run tests")
+                || lower.contains("mvn test")
+                || lower.contains("validate")
+                || lower.contains("validation")
+                || lower.contains("测试")
+                || lower.contains("验证");
+    }
+
+    private List<String> changedFilesForRun(AgentState state) {
+        return state.recentFileChanges().stream()
+                .filter(change -> state.run().id().equals(change.runId()))
+                .map(change -> change.path())
+                .distinct()
+                .toList();
+    }
+
+    private List<String> recentCommandsForRun(AgentState state) {
+        return state.recentCommandExecutions().stream()
+                .filter(command -> state.run().id().equals(command.runId()))
+                .map(command -> command.command())
+                .limit(8)
+                .toList();
     }
 
     private NodeExecutionResult finishValidationResult(AgentState state, UUID stepId, ToolExecutionResult result) {

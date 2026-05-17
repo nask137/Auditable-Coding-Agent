@@ -45,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -113,7 +114,7 @@ class AgentWorkflowNodeExecutorTests {
     void appendsRecoveryPlanWhenValidationFails() {
         var ids = ids();
         var item = planItem(ids.planId(), "Validate");
-        var state = state(ids, new PlanView(plan(ids), List.of(item)), null, Map.of());
+        var state = state(ids, new PlanView(plan(ids), List.of(item)), null, Map.of("taskType", "TEST"));
         var step = step(ids.runId(), null, Domain.StepType.VALIDATE);
         var action = action(step.id());
         when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
@@ -145,6 +146,21 @@ class AgentWorkflowNodeExecutorTests {
         verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.ACTIVE);
         verify(planService).appendRecoveryItems(ids.taskId(), ids.runId(), ids.planId(), recoveryDraft, null,
                 "exit 1", failure.id());
+    }
+
+    @Test
+    void skipsValidationWithoutModelCallWhenCodingRunMadeNoFileChanges() {
+        var ids = ids();
+        var state = state(ids, new PlanView(plan(ids), List.of()), null, Map.of("taskType", "REVIEW"));
+        when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.summary()).contains("Skipped validation");
+        verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.COMPLETED);
+        verify(llmGateway, never()).suggestValidation(any());
     }
 
     @Test

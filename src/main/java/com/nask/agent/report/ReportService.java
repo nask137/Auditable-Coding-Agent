@@ -2,6 +2,7 @@ package com.nask.agent.report;
 
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.ApiException;
+import com.nask.agent.conversation.ConversationService;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.llm.FinalReportDraft;
 import com.nask.agent.llm.LlmGateway;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -28,6 +30,7 @@ public class ReportService {
     private final RuntimeFailureService runtimeFailureService;
     private final WorkflowService workflowService;
     private final ProjectMemoryRepository projectMemoryRepository;
+    private final ConversationService conversationService;
 
     /**
      * Creates a report service.
@@ -35,7 +38,7 @@ public class ReportService {
     public ReportService(TaskReportRepository repository, LlmGateway llmGateway,
                          FileChangeRepository fileChangeRepository, AuditService auditService,
                          RuntimeFailureService runtimeFailureService, WorkflowService workflowService,
-                         ProjectMemoryRepository projectMemoryRepository) {
+                         ProjectMemoryRepository projectMemoryRepository, ConversationService conversationService) {
         this.repository = repository;
         this.llmGateway = llmGateway;
         this.fileChangeRepository = fileChangeRepository;
@@ -43,13 +46,13 @@ public class ReportService {
         this.runtimeFailureService = runtimeFailureService;
         this.workflowService = workflowService;
         this.projectMemoryRepository = projectMemoryRepository;
+        this.conversationService = conversationService;
     }
 
     /**
      * Generates and persists a Markdown report for the given task/run.
      */
     public TaskReport generate(CodingTask task, UUID runId, String resultSummary) {
-        FinalReportDraft draft = llmGateway.generateReport(new ReportContext(task.id(), runId, task.userRequest(), resultSummary));
         var changes = fileChangeRepository.findByTask(task.id());
         var events = auditService.eventsForTask(task.id());
         var failures = runtimeFailureService.findByTask(task.id());
@@ -58,9 +61,20 @@ public class ReportService {
         var profile = projectMemoryRepository.findProfileByWorkspace(task.workspaceId()).orElse(null);
         var retrievals = projectMemoryRepository.findMemoryRetrievalsByRun(runId);
         var proposals = projectMemoryRepository.findMemoryWriteProposalsByRun(runId);
+        var previousTasks = conversationService.previousTaskContext(task.conversationId(), task.id(), 5);
+        var workflowSummaries = workflowNodes.stream()
+                .filter(node -> node.outputSummary() != null && !node.outputSummary().isBlank())
+                .map(node -> "%s %s - %s".formatted(node.nodeId(), node.status(), compact(node.outputSummary(), 180)))
+                .toList();
+        var changedFiles = changes.stream().map(change -> change.path()).distinct().toList();
+        var previousPrompts = previousTasks.stream().map(previous -> compact(previous.prompt(), 300)).toList();
+        FinalReportDraft draft = llmGateway.generateReport(new ReportContext(task.id(), runId,
+                task.userRequest(), resultSummary, workflowSummaries, changedFiles, previousPrompts));
         // The LLM drafts the narrative, while deterministic sections append the
         // exact file-change and audit trails stored by the runtime.
-        var content = draft.markdown()
+        var content = deterministicSummary(task, resultSummary, workflowSummaries, changedFiles, previousPrompts)
+                + "\n## Model Summary\n\n"
+                + draft.markdown()
                 + "\n## Project Context\n\n"
                 + (profile == null ? "- Project profile: not available\n"
                 : "- Project profile: %s; frameworks %s; build tools %s; test tools %s\n"
@@ -91,6 +105,42 @@ public class ReportService {
                 + events.stream().map(event -> "- %s `%s`".formatted(event.occurredAt(), event.eventType()))
                 .reduce("", (a, b) -> a + b + "\n");
         return repository.insert(new TaskReport(UUID.randomUUID(), task.id(), runId, content, Instant.now()));
+    }
+
+    private String deterministicSummary(CodingTask task, String resultSummary, List<String> workflowSummaries,
+                                        List<String> changedFiles, List<String> previousPrompts) {
+        return """
+                # Agent Run Report
+
+                ## Summary
+
+                - Request: %s
+                - Result: %s
+                - Conversation memory: %s
+                - Changed files: %s
+
+                ## Key Outputs
+
+                %s
+
+                """.formatted(compact(task.userRequest(), 500), compact(resultSummary, 500),
+                previousPrompts.isEmpty()
+                        ? "no previous prompt found in this conversation"
+                        : "previous prompt was `%s`".formatted(previousPrompts.getFirst()),
+                changedFiles.isEmpty() ? "none" : String.join(", ", changedFiles),
+                workflowSummaries.isEmpty()
+                        ? "- No workflow output summaries were recorded."
+                        : workflowSummaries.stream().limit(8)
+                        .map(summary -> "- " + summary)
+                        .reduce("", (a, b) -> a + b + "\n").strip());
+    }
+
+    private String compact(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return "(none)";
+        }
+        var normalized = value.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength - 3) + "...";
     }
 
     private String sourceRef(com.nask.agent.memory.SourceReference ref) {

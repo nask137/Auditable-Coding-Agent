@@ -50,4 +50,19 @@ class LlmPromptFactoryTests {
                 .contains("Every CREATE_FILE action must include a non-empty content string")
                 .contains("Do not use CREATE_FILE to create directories");
     }
+
+    @Test
+    void validationPromptIsRiskBasedAndDefaultsToSkipWhenNoFilesChanged() {
+        var prompt = prompts.validationDecision(new ValidationContext(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), List.of(), null, "REVIEW", "explain this code", List.of(), List.of()));
+
+        assertThat(prompt.version()).isEqualTo("validation-decision-v2");
+        assertThat(prompt.user())
+                .contains("\"shouldValidate\": false")
+                .contains("\"executableAndArgs\": []")
+                .contains("Validation is risk-based, not mandatory")
+                .contains("no files changed")
+                .contains("read-only review")
+                .doesNotContain("\"executableAndArgs\": [\"mvn\", \"test\"]");
+    }
 }

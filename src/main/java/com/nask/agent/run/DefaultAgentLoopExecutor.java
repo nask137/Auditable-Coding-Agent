@@ -366,9 +366,17 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
      */
     private ToolExecutionResult validateIfNeeded(UUID taskId, UUID runId, com.nask.agent.workspace.Workspace workspace,
                                                  PlanView plan) {
+        var task = taskService.getRequired(taskId);
+        var changedFileCount = fileChangeRepository.countByRun(runId);
+        if (changedFileCount == 0 && !explicitlyAskedForValidation(task.userRequest())) {
+            return ToolExecutionResult.success("Task completed. Skipped validation because this run made no file changes.",
+                    Map.of());
+        }
         var validation = callModelWithRecovery(taskId, runId, null, null, "suggest validation",
                 () -> llmGateway.suggestValidation(new ValidationContext(taskId, runId, workspace.id(),
-                        recoveryNotes(runId))));
+                        recoveryNotes(runId), null, "CODE_EDIT", task.userRequest(),
+                        changedFileCount == 0 ? List.of() : List.of(changedFileCount + " file change(s) recorded"),
+                        List.of())));
         if (validation == null) {
             return ToolExecutionResult.waiting(null, "Waiting for user input");
         }
@@ -421,6 +429,20 @@ public class DefaultAgentLoopExecutor implements AgentLoopExecutor {
             return ToolExecutionResult.waiting(null, "Waiting for user input");
         }
         return ToolExecutionResult.blocked("Validation failed: " + result.summary());
+    }
+
+    private boolean explicitlyAskedForValidation(String request) {
+        if (request == null) {
+            return false;
+        }
+        var lower = request.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("run test")
+                || lower.contains("run tests")
+                || lower.contains("mvn test")
+                || lower.contains("validate")
+                || lower.contains("validation")
+                || lower.contains("测试")
+                || lower.contains("验证");
     }
 
     /**
