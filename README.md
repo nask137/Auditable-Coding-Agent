@@ -33,19 +33,16 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 - Flyway
 - Spring JDBC
 - picocli
+- React 19 / Vite / TypeScript
 - JUnit 5 / AssertJ / Mockito
 
 ## 项目结构
 
 ```text
 .
-├── docs/                         # 产品定位、MVP 规范、阶段设计和测试指南
+├── docs/                         # 当前保留的项目计划和 CLI 使用指南
 │   ├── auditable-coding-agent-plan.md
-│   ├── step0/
-│   ├── step1/
-│   ├── step2/
-│   ├── step3/
-│   └── step4/
+│   └── cli-usage-guide.md
 ├── src/main/java/com/nask/agent/
 │   ├── AgentApplication.java      # Spring Boot 入口
 │   ├── action/                    # AgentAction 记录
@@ -55,9 +52,12 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 │   ├── cli/                       # picocli 客户端
 │   ├── command/                   # 命令策略和命令执行
 │   ├── common/                    # 通用配置、枚举、错误处理
+│   ├── conversation/              # CLI 会话和 transcript 记录
 │   ├── file/                      # 文件工具、diff 和文件变更记录
+│   ├── git/                       # Git 只读工具
 │   ├── llm/                       # LLM Gateway 接口和 Stub 实现
 │   ├── memory/                    # 项目扫描、画像、索引、检索和记忆写入审批
+│   ├── permission/                # CLI 权限预设和本机配置
 │   ├── plan/                      # Plan / PlanItem
 │   ├── report/                    # 任务报告
 │   ├── run/                       # AgentRun 生命周期和 legacy loop 接口
@@ -70,8 +70,16 @@ Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服
 │   └── workspace/                 # Workspace 和路径边界保护
 ├── src/main/resources/
 │   ├── application.properties     # 默认配置
+│   ├── application-dev.properties # 本地开发 profile 覆盖
+│   ├── application-test.properties # 测试 profile 覆盖
 │   └── db/migration/              # Flyway schema
 ├── src/test/java/                 # 单元测试和阶段 1 API 集成测试
+├── tools/
+│   └── mock_llm_server.py         # 本地 HTTP LLM mock 服务
+├── web-dashboard/                 # React/Vite Web 控制台
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.ts
 └── pom.xml
 ```
 
@@ -84,12 +92,12 @@ java -version
 mvn -version
 ```
 
-项目默认使用 Java 25。后端默认连接本地 PostgreSQL：
+项目默认使用 Java 25。后端连接 PostgreSQL，主配置通过环境变量提供数据源：
 
 ```text
-jdbc:postgresql://localhost:5432/auditable_agent
-username: username
-password: password
+DATASOURCE_URL=jdbc:postgresql://localhost:5432/auditable_agent
+DATASOURCE_USERNAME=username
+DATASOURCE_PASSWORD=password
 ```
 
 可以用 Docker 启动一个本地数据库：
@@ -147,7 +155,7 @@ $env:AGENT_LLM_REASONING_EFFORT='high'
 
 HTTP 网关调用 `/chat/completions`，使用 JSON output mode。DeepSeek thinking mode 默认禁用，可通过 `AGENT_LLM_THINKING_ENABLED=true` 开启，或用 `AGENT_LLM_REASONING_EFFORT=high|max` 调整 effort。模型只返回结构化意图，实际文件和命令操作仍经过 Runtime 校验、审批和审计。
 
-## 启动服务
+## 启动后端服务
 
 ```powershell
 mvn spring-boot:run
@@ -169,9 +177,25 @@ agent.project-scan.max-file-bytes=262144
 agent.project-scan.max-total-bytes=10485760
 ```
 
+## 启动 Web Dashboard
+
+Web 控制台位于 `web-dashboard/`，用于查看 workspace、任务、运行详情、工作流审计、上下文、记忆、CLI 会话和本机设置。
+
+```powershell
+cd web-dashboard
+npm install
+npm run dev
+```
+
+Vite 默认监听：
+
+```text
+http://localhost:5173
+```
+
 ## CLI 使用
 
-CLI 位于 `com.nask.agent.cli.AgentCli`。默认运行 `agent` 会进入 Codex 风格的交互式终端会话；原有 REST 包装命令仍保留为显式子命令。先编译并生成运行 classpath：
+CLI 位于 `com.nask.agent.cli.AgentCli`。默认运行 `agent` 会进入 Codex 风格的交互式终端会话；原有 REST 包装命令仍保留为显式子命令。更完整的说明见 `docs/cli-usage-guide.md`。先编译并生成运行 classpath：
 
 ```powershell
 mvn -q "-DskipTests" package
@@ -492,33 +516,18 @@ mvn test
 
 ## 设计文档
 
-建议按顺序阅读：
+当前 `docs/` 目录只保留：
 
 - `docs/auditable-coding-agent-plan.md`：总体建设计划。
-- `docs/step0/product-positioning.md`：产品定位。
-- `docs/step0/mvp-specification.md`：第一版 MVP 规范。
-- `docs/step0/core-domain-model.md`：核心领域模型。
-- `docs/step0/permission-model.md`：权限模型。
-- `docs/step0/audit-log-model.md`：审计日志模型。
-- `docs/step1/phase1-technical-design.md`：阶段 1 技术设计。
-- `docs/step1/phase1-work-plan.md`：阶段 1 工作计划。
-- `docs/step1/phase1-cli-test-guide.md`：CLI 手工测试指南。
-- `docs/step2/phase2-work-plan.md`：阶段 2 工作计划和实现范围。
-- `docs/step3/phase3-work-plan.md`：阶段 3 工作计划和实现范围。
-- `docs/step3/default-workflows.md`：内置工作流说明。
-- `docs/step3/phase3-cli-test-guide.md`：阶段 3 CLI 手工测试指南。
-- `docs/step4/phase4-work-plan.md`：阶段 4 开发计划和里程碑范围。
-- `docs/step4/phase4-cli-test-guide.md`：阶段 4 CLI 手工测试指南。
-- `docs/step4/memory-model.md`：项目记忆、检索、索引和写入提案数据模型。
-- `docs/step4/code-understanding.md`：项目扫描、代码 outline、符号索引和检索服务说明。
+- `docs/cli-usage-guide.md`：CLI 使用指南。
 
 ## 当前限制
 
 - 默认 LLM 实现是 `StubLlmGateway`，固定生成三步计划；配置 `AGENT_LLM_PROVIDER=http` 后可使用真实模型，但模型输出仍受结构化解析、Bean Validation 和动作白名单约束。
 - Workflow Runtime 仍是同步执行；后台任务队列、WebSocket/SSE 推送和多实例协调尚未实现。
 - 阶段 4 的项目记忆和代码理解是本地确定性索引与关键词检索；尚未接入向量数据库、语言服务器、增量文件监听或语义 embedding。
-- CLI 输出原始 JSON，尚未做表格化、分页、高亮或交互式审批。
-- 目前没有 Web 控制台、IDE 插件、多 Agent、可视化检索调试或可编辑工作流 DSL。
+- CLI 仍以本机后端 REST API 为执行入口，复杂对象的展示和交互体验还在迭代中。
+- Web Dashboard 已提供基础观察面，但尚未支持实时推送、可编辑工作流 DSL、IDE 插件、多 Agent 或可视化检索调试。
 - 文件修改能力已有审计和审批基础，但默认 Stub provider 目前只演示创建 `AGENT_TASK_NOTE.md`，不会自动修改业务源码。
 
 ## 后续方向
