@@ -32,19 +32,14 @@ export type CodingTask = {
   title?: string;
   userRequest: string;
   status: string;
+  workflowName?: string;
+  agentMode?: string;
+  executionStartedAt?: string;
+  executionFinishedAt?: string;
+  failureReason?: string;
+  runtimeMetadata?: Record<string, any>;
   createdAt?: string;
   updatedAt?: string;
-};
-
-export type AgentRun = {
-  id: Id;
-  taskId: Id;
-  workflowName?: string;
-  status: string;
-  startedAt?: string;
-  finishedAt?: string;
-  completedAt?: string;
-  failureReason?: string;
 };
 
 export type PlanView = {
@@ -65,7 +60,6 @@ export type AgentStep = Record<string, any> & {
 export type WorkflowNodeExecution = {
   id: Id;
   taskId: Id;
-  runId: Id;
   workflowDefinitionId: Id;
   nodeId: string;
   nodeType: string;
@@ -81,7 +75,6 @@ export type WorkflowNodeExecution = {
 export type WorkflowEdgeDecision = {
   id: Id;
   taskId: Id;
-  runId: Id;
   workflowDefinitionId: Id;
   fromNodeId: string;
   toNodeId: string;
@@ -96,7 +89,6 @@ export type WorkflowEdgeDecision = {
 export type AuditEvent = Record<string, any> & {
   id: Id;
   taskId?: Id;
-  runId?: Id;
   eventType?: string;
   actor?: string;
   actionType?: string;
@@ -129,7 +121,6 @@ export type RuntimeFailure = Record<string, any> & {
 export type TaskReport = {
   id: Id;
   taskId: Id;
-  runId: Id;
   contentMd: string;
   createdAt?: string;
 };
@@ -197,7 +188,6 @@ export type CliRuntimeSettings = {
 export type CliSessionSummary = {
   sessionId: string;
   workspaceId?: string;
-  runId?: string;
   taskId?: string;
   status?: string;
   updatedAt?: string;

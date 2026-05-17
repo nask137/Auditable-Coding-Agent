@@ -53,6 +53,14 @@ public class ProjectMemoryController {
     }
 
     /**
+     * Lists scan execution history for a workspace.
+     */
+    @GetMapping("/{workspaceId}/scan-executions")
+    List<ProjectScanRun> scanExecutions(@PathVariable UUID workspaceId) {
+        return service.scanRuns(workspaceId);
+    }
+
+    /**
      * Lists project memory items for a workspace.
      */
     @GetMapping("/{workspaceId}/memory")

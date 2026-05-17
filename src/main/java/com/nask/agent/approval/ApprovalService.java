@@ -5,8 +5,8 @@ import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.ApiException;
 import com.nask.agent.common.Domain;
 import com.nask.agent.memory.MemoryApprovalSynchronizer;
-import com.nask.agent.run.AgentRunService;
 import com.nask.agent.step.AgentStepService;
+import com.nask.agent.task.TaskService;
 import com.nask.agent.workflow.WorkflowService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -25,7 +25,7 @@ import java.util.UUID;
 public class ApprovalService {
     private final ApprovalRepository repository;
     private final AuditService auditService;
-    private final AgentRunService runService;
+    private final TaskService taskService;
     private final AgentStepService stepService;
     private final WorkflowService workflowService;
     private final MemoryApprovalSynchronizer memoryApprovalSynchronizer;
@@ -33,12 +33,12 @@ public class ApprovalService {
     /**
      * Creates an approval service.
      */
-    public ApprovalService(ApprovalRepository repository, AuditService auditService, AgentRunService runService,
+    public ApprovalService(ApprovalRepository repository, AuditService auditService, TaskService taskService,
                            AgentStepService stepService, WorkflowService workflowService,
                            MemoryApprovalSynchronizer memoryApprovalSynchronizer) {
         this.repository = repository;
         this.auditService = auditService;
-        this.runService = runService;
+        this.taskService = taskService;
         this.stepService = stepService;
         this.workflowService = workflowService;
         this.memoryApprovalSynchronizer = memoryApprovalSynchronizer;
@@ -75,7 +75,7 @@ public class ApprovalService {
                 approval.affectedFiles(), null, approval.id(), null, null, null, riskLevel,
                 Domain.ApprovalStatus.PENDING, true, null, null, Map.of("approvalType", type.name())));
         if (pauseRun) {
-            runService.markWaitingApproval(runId, taskId);
+            taskService.markWaitingApproval(taskId);
         }
         return approval;
     }
@@ -144,7 +144,7 @@ public class ApprovalService {
                 null, Domain.RiskLevel.valueOf(approval.riskLevel()), Domain.ApprovalStatus.APPROVED, true,
                 null, null, Map.of()));
         if (!Domain.ApprovalType.MEMORY_WRITE.name().equals(approval.approvalType())) {
-            runService.markRunning(approval.runId(), approval.taskId());
+            taskService.markRunning(approval.taskId());
         } else {
             memoryApprovalSynchronizer.approve(approval, request);
         }
@@ -173,7 +173,7 @@ public class ApprovalService {
                     Map.of("approvalId", approval.id().toString()));
         }
         if (!Domain.ApprovalType.MEMORY_WRITE.name().equals(approval.approvalType())) {
-            runService.fail(approval.runId(), approval.taskId(), "Approval denied: " + reason);
+            taskService.fail(approval.taskId(), "Approval denied: " + reason);
         } else {
             memoryApprovalSynchronizer.deny(approval);
         }

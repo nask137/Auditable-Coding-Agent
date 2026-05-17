@@ -34,7 +34,7 @@ public class MemoryWriteProposalService {
     public List<MemoryWriteProposal> proposeForTaskSummary(AgentState state) {
         var changedFiles = state.recentFileChanges().stream().map(change -> change.path()).distinct().toList();
         var validation = state.recentValidationResults().stream()
-                .filter(result -> result.runId().equals(state.run().id()))
+                .filter(result -> result.runId().equals(state.execution().id()))
                 .reduce((first, second) -> second);
         var title = "Task lesson: " + truncate(state.task().title(), 80);
         var content = """
@@ -45,15 +45,15 @@ public class MemoryWriteProposalService {
                 validation.map(result -> result.success() ? "passed - " + result.summary()
                         : "failed - " + result.summary()).orElse("not recorded")).strip();
         var type = Domain.ProjectMemoryType.TASK_LESSON.name();
-        if (repository.existsMemoryWriteProposalForRun(state.run().id(), type, title, content)) {
+        if (repository.existsMemoryWriteProposalForRun(state.execution().id(), type, title, content)) {
             return List.of();
         }
         var proposal = new MemoryWriteProposal(UUID.randomUUID(), state.workspace().id(), state.task().id(),
-                state.run().id(), type, title, content, sourceRefs(state), 
+                state.execution().id(), type, title, content, sourceRefs(state), 
                 Domain.MemoryWriteProposalStatus.WAITING_APPROVAL.name(), null, null, Instant.now(), null,
                 Map.of("changedFiles", changedFiles, "validationRecorded", validation.isPresent()));
         repository.insertMemoryWriteProposal(proposal);
-        var approval = approvalService.create(state.task().id(), state.run().id(), null, null,
+        var approval = approvalService.create(state.task().id(), state.execution().id(), null, null,
                 Domain.ApprovalType.MEMORY_WRITE, Domain.RiskLevel.LOW,
                 "Approve long-term project memory write: " + title,
                 List.of("memory-proposal:" + proposal.id()), null, null, content, false);
@@ -142,3 +142,4 @@ public class MemoryWriteProposalService {
         return value.substring(0, max);
     }
 }
+

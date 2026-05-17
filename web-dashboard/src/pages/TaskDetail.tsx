@@ -6,19 +6,19 @@ import { WorkflowGraph } from "../components/WorkflowGraph";
 import { Badge, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorState, JsonBlock, Table, Td, Th } from "../components/ui";
 import { compactId, formatDate } from "../lib/utils";
 
-export function RunDetail() {
-  const { runId = "" } = useParams();
+export function TaskDetail() {
+  const { taskId = "" } = useParams();
   const [search] = useSearchParams();
-  const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.run(runId), enabled: Boolean(runId), refetchInterval: 8000 });
-  const taskId = search.get("taskId") ?? run.data?.taskId ?? "";
-  const plan = useQuery({ queryKey: ["plan", runId], queryFn: () => api.runPlan(runId), enabled: Boolean(runId), retry: false });
-  const steps = useQuery({ queryKey: ["steps", runId], queryFn: () => api.runSteps(runId), enabled: Boolean(runId), retry: false });
-  const nodes = useQuery({ queryKey: ["workflow-nodes", runId], queryFn: () => api.runWorkflowNodes(runId), enabled: Boolean(runId), retry: false });
-  const edges = useQuery({ queryKey: ["workflow-edges", runId], queryFn: () => api.runWorkflowEdges(runId), enabled: Boolean(runId), retry: false });
-  const events = useQuery({ queryKey: ["events", taskId], queryFn: () => api.taskEvents(taskId), enabled: Boolean(taskId), retry: false });
-  const changes = useQuery({ queryKey: ["changes", taskId], queryFn: () => api.taskChanges(taskId), enabled: Boolean(taskId), retry: false });
-  const failures = useQuery({ queryKey: ["task-failures", taskId], queryFn: () => api.taskFailures(taskId), enabled: Boolean(taskId), retry: false });
-  const report = useQuery({ queryKey: ["report", taskId], queryFn: () => api.taskReport(taskId), enabled: Boolean(taskId), retry: false });
+  const effectiveTaskId = taskId || search.get("taskId") || "";
+  const task = useQuery({ queryKey: ["task", effectiveTaskId], queryFn: () => api.task(effectiveTaskId), enabled: Boolean(effectiveTaskId), refetchInterval: 8000 });
+  const plan = useQuery({ queryKey: ["plan", effectiveTaskId], queryFn: () => api.taskPlan(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
+  const steps = useQuery({ queryKey: ["steps", effectiveTaskId], queryFn: () => api.taskSteps(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
+  const nodes = useQuery({ queryKey: ["workflow-nodes", effectiveTaskId], queryFn: () => api.taskWorkflowNodes(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
+  const edges = useQuery({ queryKey: ["workflow-edges", effectiveTaskId], queryFn: () => api.taskWorkflowEdges(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
+  const events = useQuery({ queryKey: ["events", effectiveTaskId], queryFn: () => api.taskEvents(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
+  const changes = useQuery({ queryKey: ["changes", effectiveTaskId], queryFn: () => api.taskChanges(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
+  const failures = useQuery({ queryKey: ["task-failures", effectiveTaskId], queryFn: () => api.taskFailures(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
+  const report = useQuery({ queryKey: ["report", effectiveTaskId], queryFn: () => api.taskReport(effectiveTaskId), enabled: Boolean(effectiveTaskId), retry: false });
   const graphNodes = (nodes.data ?? []).map((node) => ({
     id: node.nodeId,
     type: node.nodeType,
@@ -39,11 +39,11 @@ export function RunDetail() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>运行 {compactId(runId)}</CardTitle>
-          {run.data && <Badge>{run.data.status}</Badge>}
+          <CardTitle>任务 {compactId(effectiveTaskId)}</CardTitle>
+          {task.data && <Badge>{task.data.status}</Badge>}
         </CardHeader>
         <CardContent>
-          {run.error ? <ErrorState error={run.error} /> : <JsonBlock value={run.data ?? "正在加载运行信息..."} />}
+          {task.error ? <ErrorState error={task.error} /> : <JsonBlock value={task.data ?? "正在加载任务信息..."} />}
         </CardContent>
       </Card>
 

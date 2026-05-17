@@ -9,13 +9,12 @@ export function Dashboard() {
   const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: api.workspaces });
   const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
   const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks });
-  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
 
   const cards = [
     { label: "工作区", value: workspaces.data?.length ?? 0, icon: Database, to: "/workspaces" },
     { label: "工作流", value: workflows.data?.length ?? 0, icon: Workflow, to: "/workflow" },
     { label: "任务记录", value: tasks.data?.length ?? 0, icon: ListChecks },
-    { label: "运行记录", value: runs.data?.length ?? 0, icon: GitBranch, to: "/replay" }
+    { label: "执行回放", value: tasks.data?.length ?? 0, icon: GitBranch, to: "/replay" }
   ];
 
   const firstWorkspace = workspaces.data?.[0];
@@ -60,40 +59,40 @@ export function Dashboard() {
         ))}
       </div>
 
-      {(workspaces.error || workflows.error || tasks.error || runs.error) && (
-        <ErrorState error={workspaces.error || workflows.error || tasks.error || runs.error} />
+      {(workspaces.error || workflows.error || tasks.error) && (
+        <ErrorState error={workspaces.error || workflows.error || tasks.error} />
       )}
 
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
           <CardHeader>
-            <CardTitle>最近运行</CardTitle>
+            <CardTitle>最近任务</CardTitle>
             <GitBranch className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            {runs.data?.length ? (
+            {tasks.data?.length ? (
               <Table>
                 <thead>
                   <tr>
-                    <Th>运行</Th>
                     <Th>任务</Th>
                     <Th>状态</Th>
-                    <Th>开始时间</Th>
+                    <Th>创建时间</Th>
+                    <Th>执行开始</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {runs.data.slice(0, 8).map((run) => (
-                    <tr key={run.id}>
-                      <Td><Link className="text-primary underline" to={`/runs/${run.id}?taskId=${run.taskId}`}>{run.id}</Link></Td>
-                      <Td className="mono">{run.taskId}</Td>
-                      <Td><Badge>{run.status}</Badge></Td>
-                      <Td>{formatDate(run.startedAt)}</Td>
+                  {tasks.data.slice(0, 8).map((task) => (
+                    <tr key={task.id}>
+                      <Td><Link className="text-primary underline" to={`/tasks/${task.id}`}>{task.title ?? task.userRequest}</Link></Td>
+                      <Td><Badge>{task.status}</Badge></Td>
+                      <Td>{formatDate(task.createdAt)}</Td>
+                      <Td>{formatDate(task.executionStartedAt)}</Td>
                     </tr>
                   ))}
                 </tbody>
               </Table>
             ) : (
-              <EmptyState title="暂无运行记录" detail="任务创建、启动和交互处理仅在 CLI 中进行。" />
+              <EmptyState title="暂无任务记录" detail="任务创建、启动和交互处理仅在 CLI 中进行。" />
             )}
           </CardContent>
         </Card>

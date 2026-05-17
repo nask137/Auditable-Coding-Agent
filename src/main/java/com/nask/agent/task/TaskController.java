@@ -1,9 +1,9 @@
 package com.nask.agent.task;
 
-import com.nask.agent.run.AgentLoopExecutor;
-import com.nask.agent.run.AgentRunService;
-import com.nask.agent.run.RunTimeline;
-import com.nask.agent.run.RunTimelineService;
+import com.nask.agent.plan.PlanService;
+import com.nask.agent.plan.PlanView;
+import com.nask.agent.step.AgentStep;
+import com.nask.agent.step.AgentStepService;
 import com.nask.agent.workflow.WorkflowService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,24 +24,26 @@ import java.util.UUID;
 @RequestMapping("/api/tasks")
 public class TaskController {
     private final TaskService taskService;
-    private final AgentRunService runService;
-    private final AgentLoopExecutor loopExecutor;
-    private final com.nask.agent.run.AgentRunAsyncExecutor asyncExecutor;
+    private final TaskExecutionExecutor executionExecutor;
+    private final TaskExecutionAsyncExecutor asyncExecutor;
     private final WorkflowService workflowService;
-    private final RunTimelineService timelineService;
+    private final TaskTimelineService timelineService;
+    private final PlanService planService;
+    private final AgentStepService stepService;
 
     /**
-     * Creates a task controller with task and run orchestration services.
+     * Creates a task controller with task orchestration services.
      */
-    public TaskController(TaskService taskService, AgentRunService runService, AgentLoopExecutor loopExecutor,
-                          com.nask.agent.run.AgentRunAsyncExecutor asyncExecutor, WorkflowService workflowService,
-                          RunTimelineService timelineService) {
+    public TaskController(TaskService taskService, TaskExecutionExecutor executionExecutor,
+                          TaskExecutionAsyncExecutor asyncExecutor, WorkflowService workflowService,
+                          TaskTimelineService timelineService, PlanService planService, AgentStepService stepService) {
         this.taskService = taskService;
-        this.runService = runService;
-        this.loopExecutor = loopExecutor;
+        this.executionExecutor = executionExecutor;
         this.asyncExecutor = asyncExecutor;
         this.workflowService = workflowService;
         this.timelineService = timelineService;
+        this.planService = planService;
+        this.stepService = stepService;
     }
 
     /**
@@ -69,30 +71,30 @@ public class TaskController {
     }
 
     /**
-     * Starts a synchronous Phase 1 agent run for the task.
+     * Starts a synchronous execution for the task.
      */
     @PostMapping("/{taskId}/start")
     CodingTask start(@PathVariable UUID taskId,
                    @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
         var task = taskService.getRequired(taskId);
         var workflowDefinition = workflowService.requireEnabledByName(workflow);
-        var run = runService.createRun(task, workflowDefinition.name());
-        // Phase 1 runs inline so API clients can immediately observe the final
+        taskService.startExecution(task, workflowDefinition.name());
+        // Phase 1 executes inline so API clients can immediately observe the final
         // state or a WAITING_APPROVAL pause without a background worker.
-        loopExecutor.execute(run.id());
+        executionExecutor.execute(task.id());
         return taskService.getRequired(taskId);
     }
 
     /**
-     * Starts a run on a background worker for interactive polling clients.
+     * Starts a task execution on a background worker for interactive polling clients.
      */
     @PostMapping("/{taskId}/start-async")
     CodingTask startAsync(@PathVariable UUID taskId,
                         @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
         var task = taskService.getRequired(taskId);
         var workflowDefinition = workflowService.requireEnabledByName(workflow);
-        var run = runService.createRun(task, workflowDefinition.name());
-        asyncExecutor.submit(task.id(), run.id());
+        taskService.startExecution(task, workflowDefinition.name());
+        asyncExecutor.submit(task.id());
         return taskService.getRequired(taskId);
     }
 
@@ -108,7 +110,18 @@ public class TaskController {
      * Returns the full task execution timeline. Task id is the execution id in the single-run model.
      */
     @GetMapping("/{taskId}/timeline")
-    RunTimeline timeline(@PathVariable UUID taskId) {
+    TaskTimeline timeline(@PathVariable UUID taskId) {
         return timelineService.get(taskId);
     }
+
+    @GetMapping("/{taskId}/plan")
+    PlanView plan(@PathVariable UUID taskId) {
+        return planService.getByRun(taskId);
+    }
+
+    @GetMapping("/{taskId}/steps")
+    List<AgentStep> steps(@PathVariable UUID taskId) {
+        return stepService.findByRun(taskId);
+    }
+
 }

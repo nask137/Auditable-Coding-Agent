@@ -25,7 +25,7 @@ import java.util.concurrent.Callable;
         subcommands = {
                 AgentCli.WorkspaceCommand.class,
                 AgentCli.TuiCommand.class,
-                AgentCli.RunCommand.class,
+                AgentCli.TaskCommand.class,
                 AgentCli.StatusCommand.class,
                 AgentCli.EventsCommand.class,
                 AgentCli.FailuresCommand.class,
@@ -87,7 +87,7 @@ public class AgentCli implements Callable<Integer> {
      */
     String get(String path) throws Exception {
         var response = client.send(HttpRequest.newBuilder(URI.create(effectiveBaseUrl() + path)).GET().build(),
-                HttpResponse.BodyHandlers.ofString());
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         requireSuccess(response);
         return response.body();
     }
@@ -98,10 +98,10 @@ public class AgentCli implements Callable<Integer> {
     String post(String path, Object body) throws Exception {
         var json = body == null ? "" : mapper.writeValueAsString(body);
         var response = client.send(HttpRequest.newBuilder(URI.create(effectiveBaseUrl() + path))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(json))
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                         .build(),
-                HttpResponse.BodyHandlers.ofString());
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         requireSuccess(response);
         return response.body();
     }
@@ -111,7 +111,7 @@ public class AgentCli implements Callable<Integer> {
      */
     String delete(String path) throws Exception {
         var response = client.send(HttpRequest.newBuilder(URI.create(effectiveBaseUrl() + path)).DELETE().build(),
-                HttpResponse.BodyHandlers.ofString());
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         requireSuccess(response);
         return response.body();
     }
@@ -208,10 +208,10 @@ public class AgentCli implements Callable<Integer> {
     }
 
     /**
-     * Creates a task and starts a run.
+     * Creates a task and starts its single execution.
      */
-    @CommandLine.Command(name = "run", mixinStandardHelpOptions = true)
-    static class RunCommand implements Callable<Integer> {
+    @CommandLine.Command(name = "task", mixinStandardHelpOptions = true)
+    static class TaskCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String task;
         @CommandLine.Option(names = "--workspace", required = true) String workspaceId;
@@ -262,34 +262,34 @@ public class AgentCli implements Callable<Integer> {
     }
 
     /**
-     * Displays the workflow definition selected by a run.
+     * Displays the workflow definition selected by a task.
      */
     @CommandLine.Command(name = "workflow-status", mixinStandardHelpOptions = true)
     static class WorkflowStatusCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
-        @CommandLine.Parameters(index = "0") String runId;
+        @CommandLine.Parameters(index = "0") String taskId;
 
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            System.out.println(root.format(root.get("/api/runs/" + runId + "/workflow")));
+            System.out.println(root.format(root.get("/api/tasks/" + taskId + "/workflow")));
             return 0;
         }
     }
 
     /**
-     * Displays workflow node and edge history for a run.
+     * Displays workflow node and edge history for a task.
      */
     @CommandLine.Command(name = "workflow-path", mixinStandardHelpOptions = true)
     static class WorkflowPathCommand implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
-        @CommandLine.Parameters(index = "0") String runId;
+        @CommandLine.Parameters(index = "0") String taskId;
 
         @Override
         public Integer call() throws Exception {
             var root = (AgentCli) spec.root().userObject();
-            var nodes = root.get("/api/runs/" + runId + "/workflow/nodes");
-            var edges = root.get("/api/runs/" + runId + "/workflow/edges");
+            var nodes = root.get("/api/tasks/" + taskId + "/workflow/nodes");
+            var edges = root.get("/api/tasks/" + taskId + "/workflow/edges");
             if (root.rawJson) {
                 System.out.println(nodes);
                 System.out.println(edges);

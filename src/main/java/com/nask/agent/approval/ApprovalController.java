@@ -1,6 +1,6 @@
 package com.nask.agent.approval;
 
-import com.nask.agent.run.AgentLoopExecutor;
+import com.nask.agent.task.TaskExecutionExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,14 +23,14 @@ public class ApprovalController {
     private static final Logger log = LoggerFactory.getLogger(ApprovalController.class);
 
     private final ApprovalService approvalService;
-    private final AgentLoopExecutor loopExecutor;
+    private final TaskExecutionExecutor executionExecutor;
 
     /**
      * Creates an approval controller.
      */
-    public ApprovalController(ApprovalService approvalService, AgentLoopExecutor loopExecutor) {
+    public ApprovalController(ApprovalService approvalService, TaskExecutionExecutor executionExecutor) {
         this.approvalService = approvalService;
-        this.loopExecutor = loopExecutor;
+        this.executionExecutor = executionExecutor;
     }
 
     /**
@@ -50,7 +50,7 @@ public class ApprovalController {
     }
 
     /**
-     * Approves a request and immediately resumes the paused run.
+     * Approves a request and immediately resumes the paused task.
      */
     @PostMapping("/{approvalId}/approve")
     ApprovalRequestRecord approve(@PathVariable UUID approvalId, @RequestBody(required = false) ResolveApprovalRequest request) {
@@ -58,16 +58,16 @@ public class ApprovalController {
         // Approval resolution only changes domain state. The controller kicks the
         // synchronous Phase 1 loop so the user sees progress immediately.
         try {
-            loopExecutor.execute(approval.runId());
+            executionExecutor.execute(approval.taskId());
         } catch (RuntimeException e) {
-            log.warn("Approval {} was resolved, but run {} did not resume cleanly",
-                    approvalId, approval.runId(), e);
+            log.warn("Approval {} was resolved, but task {} did not resume cleanly",
+                    approvalId, approval.taskId(), e);
         }
         return approvalService.getRequired(approvalId);
     }
 
     /**
-     * Denies a request and fails the associated run.
+     * Denies a request and fails the associated task.
      */
     @PostMapping("/{approvalId}/deny")
     ApprovalRequestRecord deny(@PathVariable UUID approvalId, @RequestBody(required = false) ResolveApprovalRequest request) {

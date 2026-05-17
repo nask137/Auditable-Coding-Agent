@@ -83,7 +83,7 @@ class CliOutputFormatterTests {
                 [
                   {"eventType": "TaskCreated"},
                   {"eventType": "TaskCreated"},
-                  {"eventType": "AgentRunStarted"}
+                  {"eventType": "TaskExecutionStarted"}
                 ]
                 """);
 
@@ -92,3 +92,4 @@ class CliOutputFormatterTests {
         assertThat(output).contains("TaskCreated").contains("2").contains("Total events: 3");
     }
 }
+

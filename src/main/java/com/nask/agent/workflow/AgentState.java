@@ -5,7 +5,6 @@ import com.nask.agent.file.FileChange;
 import com.nask.agent.memory.MemoryContext;
 import com.nask.agent.plan.PlanItem;
 import com.nask.agent.plan.PlanView;
-import com.nask.agent.run.AgentRun;
 import com.nask.agent.runtime.RuntimeFailure;
 import com.nask.agent.runtime.UserInputRequestRecord;
 import com.nask.agent.task.CodingTask;
@@ -20,7 +19,7 @@ import java.util.Map;
  */
 public record AgentState(
         CodingTask task,
-        AgentRun run,
+        CodingTask execution,
         Workspace workspace,
         WorkflowDefinition workflow,
         PlanView plan,

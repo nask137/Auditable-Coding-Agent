@@ -7,15 +7,15 @@ import { compactId, formatDate } from "../lib/utils";
 import type { WorkflowDefinition, WorkflowEdgeDecision, WorkflowNodeExecution } from "../types";
 
 export function WorkflowAudit() {
-  const [runId, setRunId] = useState("");
+  const [taskId, setTaskId] = useState("");
   const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
-  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
+  const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks });
   const [workflowId, setWorkflowId] = useState("");
   const selectedWorkflowId = workflowId || workflows.data?.[0]?.id || "";
   const workflow = useQuery({ queryKey: ["workflow", selectedWorkflowId], queryFn: () => api.workflow(selectedWorkflowId), enabled: Boolean(selectedWorkflowId) });
-  const runWorkflow = useQuery({ queryKey: ["run-workflow", runId], queryFn: () => api.runWorkflow(runId), enabled: Boolean(runId), retry: false });
-  const nodes = useQuery({ queryKey: ["workflow-nodes", runId], queryFn: () => api.runWorkflowNodes(runId), enabled: Boolean(runId), retry: false });
-  const edges = useQuery({ queryKey: ["workflow-edges", runId], queryFn: () => api.runWorkflowEdges(runId), enabled: Boolean(runId), retry: false });
+  const taskWorkflow = useQuery({ queryKey: ["task-workflow", taskId], queryFn: () => api.taskWorkflow(taskId), enabled: Boolean(taskId), retry: false });
+  const nodes = useQuery({ queryKey: ["workflow-nodes", taskId], queryFn: () => api.taskWorkflowNodes(taskId), enabled: Boolean(taskId), retry: false });
+  const edges = useQuery({ queryKey: ["workflow-edges", taskId], queryFn: () => api.taskWorkflowEdges(taskId), enabled: Boolean(taskId), retry: false });
   const definitionGraph = workflow.data ? graphFromDefinition(workflow.data) : { nodes: [], edges: [] };
   const executionGraph = graphFromExecution(nodes.data ?? [], edges.data ?? []);
   const lastNode = nodes.data?.at(-1);
@@ -52,28 +52,28 @@ export function WorkflowAudit() {
 
       <Card>
         <CardHeader>
-          <CardTitle>运行执行路径</CardTitle>
-          <Select className="w-96" value={runId} onChange={(e) => setRunId(e.target.value)}>
-            <option value="">选择运行</option>
-            {runs.data?.map((run) => (
-              <option key={run.id} value={run.id}>
-                {compactId(run.id)} · {run.status} · {formatDate(run.startedAt)}
+          <CardTitle>任务执行路径</CardTitle>
+          <Select className="w-96" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+            <option value="">选择任务</option>
+            {tasks.data?.map((task) => (
+              <option key={task.id} value={task.id}>
+                {compactId(task.id)} · {task.status} · {formatDate(task.executionStartedAt ?? task.createdAt)}
               </option>
             ))}
           </Select>
         </CardHeader>
         <CardContent className="space-y-4">
-          {runs.error ? <ErrorState error={runs.error} /> : null}
-          {runWorkflow.data && (
+          {tasks.error ? <ErrorState error={tasks.error} /> : null}
+          {taskWorkflow.data && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span>{runWorkflow.data.name}</span>
-              <Badge>{runWorkflow.data.mode}</Badge>
-              <span className="mono text-muted-foreground">{compactId(runWorkflow.data.id)}</span>
+              <span>{taskWorkflow.data.name}</span>
+              <Badge>{taskWorkflow.data.mode}</Badge>
+              <span className="mono text-muted-foreground">{compactId(taskWorkflow.data.id)}</span>
               <span className="text-muted-foreground">已执行 {nodes.data?.length ?? 0} 个节点 / {edges.data?.length ?? 0} 条边</span>
               {lastNode ? <span className="text-muted-foreground">当前到达 {lastNode.nodeId}</span> : null}
             </div>
           )}
-          {nodes.data?.length ? <WorkflowGraph nodes={executionGraph.nodes} edges={executionGraph.edges} /> : <EmptyState title="选择运行以可视化执行过程" />}
+          {nodes.data?.length ? <WorkflowGraph nodes={executionGraph.nodes} edges={executionGraph.edges} /> : <EmptyState title="选择任务以可视化执行过程" />}
         </CardContent>
       </Card>
 

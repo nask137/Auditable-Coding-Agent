@@ -3,8 +3,8 @@ package com.nask.agent.approval;
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.Domain;
 import com.nask.agent.memory.MemoryApprovalSynchronizer;
-import com.nask.agent.run.AgentRunService;
 import com.nask.agent.step.AgentStepService;
+import com.nask.agent.task.TaskService;
 import com.nask.agent.workflow.WorkflowService;
 import org.junit.jupiter.api.Test;
 
@@ -21,11 +21,11 @@ import static org.mockito.Mockito.when;
 class ApprovalServiceTests {
     private final ApprovalRepository repository = mock(ApprovalRepository.class);
     private final AuditService auditService = mock(AuditService.class);
-    private final AgentRunService runService = mock(AgentRunService.class);
+    private final TaskService taskService = mock(TaskService.class);
     private final AgentStepService stepService = mock(AgentStepService.class);
     private final WorkflowService workflowService = mock(WorkflowService.class);
     private final MemoryApprovalSynchronizer memoryApprovalSynchronizer = mock(MemoryApprovalSynchronizer.class);
-    private final ApprovalService service = new ApprovalService(repository, auditService, runService, stepService,
+    private final ApprovalService service = new ApprovalService(repository, auditService, taskService, stepService,
             workflowService, memoryApprovalSynchronizer);
 
     @Test

@@ -53,7 +53,7 @@ public class AgentStepService {
      */
     public void markWaitingApproval(UUID taskId, UUID runId, AgentStep step, String outputSummary) {
         repository.markWaitingApproval(step.id(), outputSummary);
-        auditService.append(AuditEventDraft.info(taskId, runId, step.id(), Domain.AuditEventType.AgentRunPaused,
+        auditService.append(AuditEventDraft.info(taskId, runId, step.id(), Domain.AuditEventType.TaskExecutionPaused,
                 Domain.AuditActor.RUNTIME, step.stepType(), outputSummary));
     }
 
@@ -62,7 +62,7 @@ public class AgentStepService {
      */
     public void markWaitingUserInput(UUID taskId, UUID runId, AgentStep step, String outputSummary) {
         repository.markWaitingUserInput(step.id(), outputSummary);
-        auditService.append(AuditEventDraft.info(taskId, runId, step.id(), Domain.AuditEventType.AgentRunPaused,
+        auditService.append(AuditEventDraft.info(taskId, runId, step.id(), Domain.AuditEventType.TaskExecutionPaused,
                 Domain.AuditActor.RUNTIME, step.stepType(), outputSummary));
     }
 
@@ -92,3 +92,4 @@ public class AgentStepService {
                 new ApiException(HttpStatus.NOT_FOUND, "STEP_NOT_FOUND", "AgentStep not found: " + id));
     }
 }
+

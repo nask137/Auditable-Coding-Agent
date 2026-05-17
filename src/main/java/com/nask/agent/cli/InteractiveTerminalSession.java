@@ -3,6 +3,7 @@ package com.nask.agent.cli;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Scanner;
@@ -20,11 +21,10 @@ class InteractiveTerminalSession {
     private final CliLocalConfig config;
     private final CliSessionStore sessions;
     private final CliOutputFormatter formatter;
-    private final Scanner scanner = new Scanner(System.in);
+    private final Scanner scanner = new Scanner(System.in, inputCharset());
     private String workspaceId = "";
     private String conversationId = "";
     private String taskId = "";
-    private String runId = "";
     private int renderedEvents;
 
     InteractiveTerminalSession(AgentCli cli, boolean rawJson) {
@@ -40,7 +40,7 @@ class InteractiveTerminalSession {
 
     void run(String initialPrompt) throws Exception {
         System.out.println("Auditable Agent TUI. Type /status, /workspace, /plan, /diff, /permissions, /resume, /new, /exit.");
-        sessions.append("session_started", workspaceId, conversationId, taskId, runId, "", "session started");
+        sessions.append("session_started", workspaceId, conversationId, taskId, taskId, "", "session started");
         if (initialPrompt != null && !initialPrompt.isBlank()) {
             try {
                 submitPrompt(initialPrompt);
@@ -88,10 +88,9 @@ class InteractiveTerminalSession {
             }
             case "new" -> {
                 taskId = "";
-                runId = "";
                 conversationId = "";
                 renderedEvents = 0;
-                sessions.append("new", workspaceId, conversationId, taskId, runId, "", "new conversation");
+                sessions.append("new", workspaceId, conversationId, taskId, taskId, "", "new conversation");
                 System.out.println("Started a new conversation in this terminal session.");
                 yield false;
             }
@@ -149,9 +148,8 @@ class InteractiveTerminalSession {
         conversationId = created.path("conversationId").asText(conversationId);
         taskId = created.path("id").asText();
         var started = mapper.readTree(cli.post("/api/tasks/" + taskId + "/start-async?workflow=" + workflow, null));
-        runId = taskId;
         renderedEvents = 0;
-        sessions.append("prompt", workspaceId, conversationId, taskId, runId, started.path("status").asText(), prompt);
+        sessions.append("prompt", workspaceId, conversationId, taskId, taskId, started.path("status").asText(), prompt);
         config.save();
         pollUntilBlockedOrDone();
     }
@@ -166,8 +164,8 @@ class InteractiveTerminalSession {
             var events = timeline.path("events");
             System.out.print(formatter.timelineUpdate(timeline, renderedEvents));
             renderedEvents = events.isArray() ? events.size() : renderedEvents;
-            var status = timeline.path("run").path("status").asText("");
-            sessions.append("timeline", workspaceId, conversationId, taskId, runId, status, status);
+            var status = timeline.path("task").path("status").asText("");
+            sessions.append("timeline", workspaceId, conversationId, taskId, taskId, status, status);
             if ("WAITING_APPROVAL".equals(status)) {
                 resolveApproval(timeline);
                 return;
@@ -361,7 +359,7 @@ class InteractiveTerminalSession {
                     Workspace ID: %s
                     Conversation: %s
                     Workspace root: %s
-                    Run: none
+                    Task: none
                     """.formatted(sessions.sessionId(), cli.effectiveBaseUrl(), config.get("permission_preset"),
                     unresolvedWorkspaceId(), valueOrUnset(conversationId), currentWorkspaceRoot()));
             return;
@@ -410,7 +408,6 @@ class InteractiveTerminalSession {
         var state = sessions.lastState(id);
         sessions.use(id);
         taskId = state.getOrDefault("taskId", "");
-        runId = state.getOrDefault("runId", "");
         conversationId = state.getOrDefault("conversationId", "");
         workspaceId = state.getOrDefault("workspaceId", workspaceId);
         renderedEvents = 0;
@@ -421,14 +418,14 @@ class InteractiveTerminalSession {
     private void withTimeline(TimelineConsumer consumer) throws Exception {
         var timeline = currentTimeline();
         if (timeline == null) {
-            System.out.println("No active run. Submit a prompt first or use /resume.");
+            System.out.println("No active task. Submit a prompt first or use /resume.");
             return;
         }
         consumer.accept(timeline);
     }
 
     private JsonNode currentTimeline() throws Exception {
-        if (runId == null || runId.isBlank()) {
+        if (taskId == null || taskId.isBlank()) {
             return null;
         }
         return mapper.readTree(cli.get("/api/tasks/" + taskId + "/timeline"));
@@ -511,6 +508,14 @@ class InteractiveTerminalSession {
                 || text.contains("明显的bug")
                 || text.contains("审查")
                 || text.contains("检查问题");
+    }
+
+    static Charset inputCharset() {
+        var console = System.console();
+        if (console != null) {
+            return console.charset();
+        }
+        return Charset.defaultCharset();
     }
 
     private JsonNode firstPending(JsonNode array) {

@@ -1,6 +1,6 @@
 package com.nask.agent.runtime;
 
-import com.nask.agent.run.AgentLoopExecutor;
+import com.nask.agent.task.TaskExecutionExecutor;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,11 +20,11 @@ import java.util.UUID;
 @RequestMapping("/api/user-input-requests")
 public class UserInputRequestController {
     private final UserInputRequestService service;
-    private final AgentLoopExecutor loopExecutor;
+    private final TaskExecutionExecutor executionExecutor;
 
-    public UserInputRequestController(UserInputRequestService service, AgentLoopExecutor loopExecutor) {
+    public UserInputRequestController(UserInputRequestService service, TaskExecutionExecutor executionExecutor) {
         this.service = service;
-        this.loopExecutor = loopExecutor;
+        this.executionExecutor = executionExecutor;
     }
 
     @GetMapping
@@ -41,7 +41,7 @@ public class UserInputRequestController {
     UserInputRequestRecord answer(@PathVariable UUID requestId, @Valid @RequestBody AnswerUserInputRequest request) {
         var answered = service.answer(requestId, request);
         if ("ANSWERED".equals(answered.status())) {
-            loopExecutor.execute(answered.runId());
+            executionExecutor.execute(answered.taskId());
         }
         return service.getRequired(requestId);
     }

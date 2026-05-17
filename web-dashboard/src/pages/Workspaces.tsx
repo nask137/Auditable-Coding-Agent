@@ -11,7 +11,7 @@ export function Workspaces() {
   const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: api.workspaces });
   const workspaceId = selected || workspaces.data?.[0]?.id || "";
   const profile = useQuery({ queryKey: ["profile", workspaceId], queryFn: () => api.profile(workspaceId), enabled: Boolean(workspaceId), retry: false });
-  const scanRuns = useQuery({ queryKey: ["scan-runs", workspaceId], queryFn: () => api.scanRuns(workspaceId), enabled: Boolean(workspaceId) });
+  const scanExecutions = useQuery({ queryKey: ["scan-executions", workspaceId], queryFn: () => api.scanExecutions(workspaceId), enabled: Boolean(workspaceId) });
   const policies = useQuery({ queryKey: ["command-policies", workspaceId], queryFn: () => api.commandPolicies(workspaceId), enabled: Boolean(workspaceId) });
 
   const create = useMutation({
@@ -26,7 +26,7 @@ export function Workspaces() {
     mutationFn: () => api.scanWorkspace(workspaceId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["profile", workspaceId] });
-      qc.invalidateQueries({ queryKey: ["scan-runs", workspaceId] });
+      qc.invalidateQueries({ queryKey: ["scan-executions", workspaceId] });
     }
   });
 
@@ -89,15 +89,15 @@ export function Workspaces() {
           <Card>
             <CardHeader><CardTitle>扫描历史</CardTitle></CardHeader>
             <CardContent>
-              {scanRuns.data?.length ? (
+              {scanExecutions.data?.length ? (
                 <Table>
                   <thead><tr><Th>状态</Th><Th>文件数</Th><Th>完成时间</Th></tr></thead>
                   <tbody>
-                    {scanRuns.data.slice(0, 8).map((run) => (
-                      <tr key={run.id}>
-                        <Td><Badge>{asText(run.status)}</Badge></Td>
-                        <Td>{asText(run.filesIndexed ?? run.files_seen)}</Td>
-                        <Td>{formatDate(run.completedAt ?? run.completed_at)}</Td>
+                    {scanExecutions.data.slice(0, 8).map((execution) => (
+                      <tr key={execution.id}>
+                        <Td><Badge>{asText(execution.status)}</Badge></Td>
+                        <Td>{asText(execution.filesIndexed ?? execution.files_seen)}</Td>
+                        <Td>{formatDate(execution.completedAt ?? execution.completed_at)}</Td>
                       </tr>
                     ))}
                   </tbody>

@@ -1,10 +1,11 @@
 package com.nask.agent.workflow;
 
 import com.nask.agent.common.Domain;
+import com.nask.agent.memory.MemoryContext;
 import com.nask.agent.report.ReportService;
-import com.nask.agent.run.AgentLoopExecutor;
-import com.nask.agent.run.AgentRun;
-import com.nask.agent.run.AgentRunService;
+import com.nask.agent.task.CodingTask;
+import com.nask.agent.task.TaskExecutionExecutor;
+import com.nask.agent.task.TaskService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
@@ -13,28 +14,27 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import com.nask.agent.memory.MemoryContext;
 
 /**
  * Workflow-native executor for built-in local agent modes.
  */
 @Primary
 @Service
-public class WorkflowAgentExecutor implements AgentLoopExecutor {
+public class WorkflowAgentExecutor implements TaskExecutionExecutor {
     private static final Logger log = LoggerFactory.getLogger(WorkflowAgentExecutor.class);
 
     private final WorkflowService workflowService;
-    private final AgentRunService runService;
+    private final TaskService taskService;
     private final AgentStateAssembler stateAssembler;
     private final WorkflowNodeRegistry nodeRegistry;
     private final ConditionEvaluator conditionEvaluator;
     private final ReportService reportService;
 
-    public WorkflowAgentExecutor(WorkflowService workflowService, AgentRunService runService,
+    public WorkflowAgentExecutor(WorkflowService workflowService, TaskService taskService,
                                  AgentStateAssembler stateAssembler, WorkflowNodeRegistry nodeRegistry,
                                  ConditionEvaluator conditionEvaluator, ReportService reportService) {
         this.workflowService = workflowService;
-        this.runService = runService;
+        this.taskService = taskService;
         this.stateAssembler = stateAssembler;
         this.nodeRegistry = nodeRegistry;
         this.conditionEvaluator = conditionEvaluator;
@@ -42,29 +42,29 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
     }
 
     @Override
-    public void execute(UUID runId) {
+    public void execute(UUID taskId) {
         try {
-            var run = runService.getRequired(runId);
-            if (!Domain.AgentRunStatus.RUNNING.name().equals(run.status())) {
+            var task = taskService.getRequired(taskId);
+            if (!Domain.TaskStatus.RUNNING.name().equals(task.status())) {
                 return;
             }
-            var workflow = workflowService.resolveForRun(run);
+            var workflow = workflowService.resolveForTask(task);
             var graph = WorkflowGraph.from(workflow);
-            var current = resumeNode(run, graph);
+            var current = resumeNode(task, graph);
             var transientData = new HashMap<String, Object>();
             NodeExecutionResult lastResult = null;
             var visited = 0;
             while (current != null) {
                 if (++visited > graph.maxNodes()) {
-                    failRun(runId, "Maximum workflow node count exceeded");
+                    failRun(taskId, "Maximum workflow node count exceeded");
                     return;
                 }
                 var node = graph.nodes().get(current);
                 if (node == null) {
-                    failRun(runId, "Workflow node not found: " + current);
+                    failRun(taskId, "Workflow node not found: " + current);
                     return;
                 }
-                var state = withTransientData(stateAssembler.assemble(runId), transientData);
+                var state = withTransientData(stateAssembler.assemble(taskId), transientData);
                 var result = nodeRegistry.get(node.type()).execute(state, node);
                 transientData.putAll(result.payload());
                 recordNode(workflow, state, node, result);
@@ -73,31 +73,31 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
                     return;
                 }
                 if (isFailed(result)) {
-                    failRun(runId, result.summary());
+                    failRun(taskId, result.summary());
                     return;
                 }
                 if (Domain.WorkflowNodeType.FINISH.name().equals(node.type())) {
                     return;
                 }
-                var decisionState = withTransientData(stateAssembler.assemble(runId), transientData);
+                var decisionState = withTransientData(stateAssembler.assemble(taskId), transientData);
                 var next = selectNext(graph, node.id(), decisionState, result);
                 if (next == null) {
-                    failRun(runId, "No workflow edge matched after node " + node.id() + " with status "
+                    failRun(taskId, "No workflow edge matched after node " + node.id() + " with status "
                             + lastResult.status());
                     return;
                 }
-                workflowService.recordEdge(state.task().id(), runId, workflow, node.id(), next.to(),
+                workflowService.recordEdge(state.task().id(), taskId, workflow, node.id(), next.to(),
                         Domain.WorkflowEdgeType.valueOf(next.type()), edgeCondition(next),
                         edgeDecisionReason(next, decisionState, result), edgeMetadata(next, decisionState, result));
                 current = next.to();
             }
         } catch (RuntimeException e) {
-            failRun(runId, "Workflow execution failed: " + message(e));
+            failRun(taskId, "Workflow execution failed: " + message(e));
         }
     }
 
-    private String resumeNode(AgentRun run, WorkflowGraph graph) {
-        var waiting = workflowService.nodes(run.id()).stream()
+    private String resumeNode(CodingTask task, WorkflowGraph graph) {
+        var waiting = workflowService.nodes(task.id()).stream()
                 .filter(node -> Domain.WorkflowNodeStatus.WAITING_APPROVAL.name().equals(node.status())
                         || Domain.WorkflowNodeStatus.WAITING_USER_INPUT.name().equals(node.status()))
                 .reduce((first, second) -> second);
@@ -112,11 +112,11 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
         var stepId = result.payload().get("stepId") == null ? null
                 : UUID.fromString(result.payload().get("stepId").toString());
         var status = status(node, result);
-        if (stepId != null && workflowService.updateStepNode(state.task().id(), state.run().id(), stepId, status,
+        if (stepId != null && workflowService.updateStepNode(state.task().id(), state.execution().id(), stepId, status,
                 node.id(), result.summary(), persistedPayload(result.payload()))) {
             return;
         }
-        workflowService.recordNode(state.task().id(), state.run().id(), workflow, node.id(),
+        workflowService.recordNode(state.task().id(), state.execution().id(), workflow, node.id(),
                 Domain.WorkflowNodeType.valueOf(node.type()), stepId, status, node.id(), result.summary(),
                 persistedPayload(result.payload()));
     }
@@ -233,7 +233,7 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
     }
 
     private AgentState withTransientData(AgentState state, Map<String, Object> transientData) {
-        return new AgentState(state.task(), state.run(), state.workspace(), state.workflow(), state.plan(),
+        return new AgentState(state.task(), state.execution(), state.workspace(), state.workflow(), state.plan(),
                 state.currentPlanItem(), state.recentFileChanges(), state.recentCommandExecutions(),
                 state.recentValidationResults(), state.pendingUserInput(), state.runtimeFailures(),
                 state.recoveryNotes(), memoryContext(transientData), Map.copyOf(transientData));
@@ -257,13 +257,13 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
         return persisted;
     }
 
-    private void failRun(UUID runId, String reason) {
-        var state = stateAssembler.assemble(runId);
-        runService.fail(runId, state.task().id(), reason);
+    private void failRun(UUID taskId, String reason) {
+        var state = stateAssembler.assemble(taskId);
+        taskService.fail(state.task().id(), reason);
         try {
-            reportService.generate(state.task(), runId, "Failed: " + reason);
+            reportService.generate(state.task(), taskId, "Failed: " + reason);
         } catch (RuntimeException e) {
-            log.warn("Failed to generate failure report for run {}", runId, e);
+            log.warn("Failed to generate failure report for task {}", taskId, e);
         }
     }
 
@@ -271,3 +271,4 @@ public class WorkflowAgentExecutor implements AgentLoopExecutor {
         return e.getMessage() == null || e.getMessage().isBlank() ? e.getClass().getSimpleName() : e.getMessage();
     }
 }
+

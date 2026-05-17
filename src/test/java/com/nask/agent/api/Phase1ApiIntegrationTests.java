@@ -87,7 +87,7 @@ class Phase1ApiIntegrationTests {
 
         var events = getList("/api/tasks/" + taskId + "/events");
         assertThat(events).extracting(event -> event.get("eventType"))
-                .contains("TaskCreated", "AgentRunStarted", "PlanCreated", "FileCreated",
+                .contains("TaskCreated", "TaskExecutionStarted", "PlanCreated", "FileCreated",
                         "CommandExecuted", "ValidationCompleted", "AgentFinished");
 
         var changes = getList("/api/tasks/" + taskId + "/changes");
@@ -102,13 +102,13 @@ class Phase1ApiIntegrationTests {
         assertThat(report.get("contentMd").toString()).contains("## Workflow");
 
         var runId = run.get("id").toString();
-        var workflow = getMap("/api/runs/" + runId + "/workflow");
+        var workflow = getMap("/api/tasks/" + runId + "/workflow");
         assertThat(workflow.get("name")).isEqualTo("coding-agent");
-        var workflowNodes = getList("/api/runs/" + runId + "/workflow/nodes");
+        var workflowNodes = getList("/api/tasks/" + runId + "/workflow/nodes");
         assertThat(workflowNodes).extracting(node -> node.get("nodeId"))
                 .contains("understand_task", "inspect_workspace", "project_memory", "code_understanding",
                         "create_plan", "execute_plan_item", "validate", "task_summary_memory", "finish");
-        var workflowEdges = getList("/api/runs/" + runId + "/workflow/edges");
+        var workflowEdges = getList("/api/tasks/" + runId + "/workflow/edges");
         assertThat(workflowEdges).isNotEmpty();
         var proposals = getList("/api/workspaces/" + workspaceId + "/memory-proposals");
         assertThat(proposals).hasSize(1);
@@ -316,7 +316,7 @@ class Phase1ApiIntegrationTests {
 
         post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "test"));
 
-        var completedRun = getMap("/api/runs/" + runId);
+        var completedRun = getMap("/api/tasks/" + runId);
         assertThat(completedRun.get("status")).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("select count(*) from plan where run_id = ?", Integer.class, java.util.UUID.fromString(runId)))
                 .isEqualTo(1);
@@ -392,7 +392,7 @@ class Phase1ApiIntegrationTests {
 
         post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "test", "reason", "not needed"));
 
-        var failedRun = getMap("/api/runs/" + runId);
+        var failedRun = getMap("/api/tasks/" + runId);
         assertThat(failedRun.get("status")).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject(
                 "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
@@ -421,8 +421,8 @@ class Phase1ApiIntegrationTests {
         assertThat(run.get("status")).isEqualTo("COMPLETED");
         assertThat(Files.exists(workspaceDir.resolve("AGENT_TASK_NOTE.md"))).isFalse();
         assertThat(getList("/api/tasks/" + taskId + "/changes")).isEmpty();
-        assertThat(getMap("/api/runs/" + runId + "/workflow").get("name")).isEqualTo("review-agent");
-        assertThat(getList("/api/runs/" + runId + "/workflow/nodes"))
+        assertThat(getMap("/api/tasks/" + runId + "/workflow").get("name")).isEqualTo("review-agent");
+        assertThat(getList("/api/tasks/" + runId + "/workflow/nodes"))
                 .extracting(node -> node.get("nodeType"))
                 .contains("WORKSPACE_INSPECTION", "CODE_UNDERSTANDING", "REPORT", "FINISH");
     }
@@ -455,11 +455,11 @@ class Phase1ApiIntegrationTests {
         assertThat(Files.exists(workspaceDir.resolve("AGENT_TASK_NOTE.md"))).isFalse();
         assertThat(jdbc.queryForObject("select count(*) from validation_result where run_id = ?",
                 Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
-        assertThat(getMap("/api/runs/" + runId + "/workflow").get("name")).isEqualTo("test-agent");
-        assertThat(getList("/api/runs/" + runId + "/workflow/nodes"))
+        assertThat(getMap("/api/tasks/" + runId + "/workflow").get("name")).isEqualTo("test-agent");
+        assertThat(getList("/api/tasks/" + runId + "/workflow/nodes"))
                 .extracting(node -> node.get("nodeId"))
                 .contains("validate", "report", "finish");
-        assertThat(getList("/api/runs/" + runId + "/workflow/edges"))
+        assertThat(getList("/api/tasks/" + runId + "/workflow/edges"))
                 .extracting(edge -> edge.get("toNodeId"))
                 .contains("report", "finish");
     }
@@ -517,7 +517,7 @@ class Phase1ApiIntegrationTests {
         var approvalId = commandApprovalId(approvals, runId);
         post("/api/approvals/" + approvalId + "/approve", Map.of("resolvedBy", "test"));
 
-        var completedRun = getMap("/api/runs/" + runId);
+        var completedRun = getMap("/api/tasks/" + runId);
         assertThat(completedRun.get("status")).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("select count(*) from command_execution where run_id = ?",
                 Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
@@ -525,7 +525,7 @@ class Phase1ApiIntegrationTests {
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
-        assertThat(getList("/api/runs/" + runId + "/workflow/nodes"))
+        assertThat(getList("/api/tasks/" + runId + "/workflow/nodes"))
                 .extracting(node -> node.get("nodeId"))
                 .contains("validate", "report", "finish");
         assertThat(jdbc.queryForObject("""
@@ -573,7 +573,7 @@ class Phase1ApiIntegrationTests {
         var approvalId = commandApprovalId(approvals, runId);
         post("/api/approvals/" + approvalId + "/deny", Map.of("resolvedBy", "test", "reason", "not needed"));
 
-        var failedRun = getMap("/api/runs/" + runId);
+        var failedRun = getMap("/api/tasks/" + runId);
         assertThat(failedRun.get("status")).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject("""
                 select count(*)
@@ -706,3 +706,5 @@ class Phase1ApiIntegrationTests {
         return ((List<?>) value).stream().map(Object::toString).toList();
     }
 }
+
+

@@ -4,7 +4,7 @@ import com.nask.agent.audit.AuditEventDraft;
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.ApiException;
 import com.nask.agent.common.Domain;
-import com.nask.agent.run.AgentRun;
+import com.nask.agent.task.CodingTask;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -39,9 +39,9 @@ public class WorkflowService {
                 new ApiException(HttpStatus.NOT_FOUND, "WORKFLOW_NOT_FOUND", "Workflow not found: " + id));
     }
 
-    public WorkflowDefinition resolveForRun(AgentRun run) {
+    public WorkflowDefinition resolveForTask(CodingTask task) {
         ensureBuiltIns();
-        var name = run.runtimeMetadata().getOrDefault("workflow", DEFAULT_WORKFLOW).toString();
+        var name = task.runtimeMetadata().getOrDefault("workflow", DEFAULT_WORKFLOW).toString();
         return requireEnabledByName(name);
     }
 
