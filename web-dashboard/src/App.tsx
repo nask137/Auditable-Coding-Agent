@@ -4,7 +4,7 @@ import { Context } from "./pages/Context";
 import { Dashboard } from "./pages/Dashboard";
 import { Memory } from "./pages/Memory";
 import { Replay } from "./pages/Replay";
-import { RunDetail } from "./pages/RunDetail";
+import { TaskDetail } from "./pages/TaskDetail";
 import { Settings } from "./pages/Settings";
 import { CliSessions } from "./pages/CliSessions";
 import { WorkflowAudit } from "./pages/WorkflowAudit";
@@ -17,7 +17,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: "workspaces", element: <Workspaces /> },
-      { path: "runs/:runId", element: <RunDetail /> },
+      { path: "tasks/:taskId", element: <TaskDetail /> },
       { path: "workflow", element: <WorkflowAudit /> },
       { path: "replay", element: <Replay /> },
       { path: "memory", element: <Memory /> },

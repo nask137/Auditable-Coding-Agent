@@ -26,7 +26,6 @@ class CliOutputFormatter {
     }
 
     String status(JsonNode timeline, String sessionId, String baseUrl, String permissionPreset) {
-        var run = timeline.path("run");
         var task = timeline.path("task");
         return """
                 Session: %s
@@ -35,11 +34,9 @@ class CliOutputFormatter {
                 Workspace ID: %s
                 Conversation: %s
                 Task: %s %s
-                Run: %s %s
                 """.formatted(sessionId, baseUrl, permissionPreset, task.path("workspaceId").asText(""),
                 task.path("conversationId").asText(""),
-                task.path("id").asText(""), task.path("status").asText(""),
-                run.path("id").asText(""), run.path("status").asText(""));
+                task.path("id").asText(""), task.path("status").asText(""));
     }
 
     String plan(JsonNode timeline) {
@@ -106,11 +103,9 @@ class CliOutputFormatter {
     String finalSummary(JsonNode timeline) {
         var builder = new StringBuilder();
         var task = timeline.path("task");
-        var run = timeline.path("run");
         builder.append("Task ").append(shortId(task.path("id").asText("")))
                 .append(" ").append(task.path("status").asText(""))
-                .append("; run ").append(shortId(run.path("id").asText("")))
-                .append(" ").append(run.path("status").asText("")).append("\n\n");
+                .append("\n\n");
         if (!task.path("conversationId").asText("").isBlank()) {
             builder.append("Conversation ").append(shortId(task.path("conversationId").asText("")))
                     .append("; prompt #").append(task.path("promptIndex").asText("")).append("\n\n");
@@ -190,9 +185,9 @@ class CliOutputFormatter {
         if (events.isArray() && eventOffset >= events.size()) {
             return "";
         }
-        var run = timeline.path("run");
-        builder.append("Run ").append(shortId(run.path("id").asText("")))
-                .append(" status: ").append(run.path("status").asText("")).append("\n");
+        var task = timeline.path("task");
+        builder.append("Task ").append(shortId(task.path("id").asText("")))
+                .append(" status: ").append(task.path("status").asText("")).append("\n");
         var nodes = timeline.path("workflowNodes");
         if (nodes.isArray() && !nodes.isEmpty()) {
             var last = nodes.get(nodes.size() - 1);

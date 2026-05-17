@@ -4,7 +4,7 @@ import com.nask.agent.audit.AuditEventDraft;
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.ApiException;
 import com.nask.agent.common.Domain;
-import com.nask.agent.run.AgentRunService;
+import com.nask.agent.task.TaskService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,13 +21,13 @@ import java.util.UUID;
 public class UserInputRequestService {
     private final UserInputRequestRepository repository;
     private final AuditService auditService;
-    private final AgentRunService runService;
+    private final TaskService taskService;
 
     public UserInputRequestService(UserInputRequestRepository repository, AuditService auditService,
-                                   AgentRunService runService) {
+                                   TaskService taskService) {
         this.repository = repository;
         this.auditService = auditService;
-        this.runService = runService;
+        this.taskService = taskService;
     }
 
     @Transactional
@@ -45,7 +45,7 @@ public class UserInputRequestService {
                 Domain.AuditEventType.RecoveryUserInputRequested, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
                 "Ask user", question, List.of(), null, null, null, null, null, Domain.RiskLevel.MEDIUM,
                 null, true, null, null, Map.of("userInputRequestId", request.id().toString())));
-        runService.markWaitingUserInput(runId, taskId, "Waiting for user input: " + question);
+        taskService.markWaitingUserInput(taskId, "Waiting for user input: " + question);
         return request;
     }
 
@@ -74,7 +74,7 @@ public class UserInputRequestService {
                 current.question(), request.answer(), List.of(), null, null, null, null, null,
                 Domain.RiskLevel.LOW, null, true, null, null,
                 Map.of("userInputRequestId", current.id().toString())));
-        runService.markRunning(current.runId(), current.taskId());
+        taskService.markRunning(current.taskId());
         return getRequired(id);
     }
 
@@ -88,7 +88,7 @@ public class UserInputRequestService {
                 current.question(), "User input request cancelled", List.of(), null, null, null, null,
                 null, Domain.RiskLevel.MEDIUM, null, false, "USER_INPUT_CANCELLED",
                 "User input request cancelled", Map.of("userInputRequestId", current.id().toString())));
-        runService.fail(current.runId(), current.taskId(), "User input request cancelled");
+        taskService.fail(current.taskId(), "User input request cancelled");
         return getRequired(id);
     }
 

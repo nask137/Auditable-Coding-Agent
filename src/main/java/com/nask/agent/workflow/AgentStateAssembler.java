@@ -7,7 +7,6 @@ import com.nask.agent.memory.ProjectMemoryRepository;
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.runtime.UserInputRequestService;
-import com.nask.agent.run.AgentRunService;
 import com.nask.agent.task.TaskService;
 import com.nask.agent.validation.ValidationRepository;
 import com.nask.agent.workspace.WorkspaceService;
@@ -21,7 +20,6 @@ import java.util.UUID;
  */
 @Component
 public class AgentStateAssembler {
-    private final AgentRunService runService;
     private final TaskService taskService;
     private final WorkspaceService workspaceService;
     private final WorkflowService workflowService;
@@ -33,7 +31,7 @@ public class AgentStateAssembler {
     private final RuntimeFailureService runtimeFailureService;
     private final ProjectMemoryRepository projectMemoryRepository;
 
-    public AgentStateAssembler(AgentRunService runService, TaskService taskService, WorkspaceService workspaceService,
+    public AgentStateAssembler(TaskService taskService, WorkspaceService workspaceService,
                                WorkflowService workflowService, PlanService planService,
                                FileChangeRepository fileChangeRepository,
                                CommandExecutionRepository commandExecutionRepository,
@@ -41,7 +39,6 @@ public class AgentStateAssembler {
                                UserInputRequestService userInputRequestService,
                                RuntimeFailureService runtimeFailureService,
                                ProjectMemoryRepository projectMemoryRepository) {
-        this.runService = runService;
         this.taskService = taskService;
         this.workspaceService = workspaceService;
         this.workflowService = workflowService;
@@ -55,10 +52,9 @@ public class AgentStateAssembler {
     }
 
     public AgentState assemble(UUID runId) {
-        var run = runService.getRequired(runId);
-        var task = taskService.getRequired(run.taskId());
+        var task = taskService.getRequired(runId);
         var workspace = workspaceService.getRequired(task.workspaceId());
-        var workflow = workflowService.resolveForRun(run);
+        var workflow = workflowService.resolveForTask(task);
         var plan = planService.findByRun(runId);
         var currentItem = plan == null ? null : planService.nextPending(plan.plan().id());
         var failures = runtimeFailureService.findByRun(runId);
@@ -70,7 +66,7 @@ public class AgentStateAssembler {
         // 装配 MemoryContext
         var memoryContext = loadMemoryContextForRun(runId, task.workspaceId());
 
-        return new AgentState(task, run, workspace, workflow, plan, currentItem,
+        return new AgentState(task, task, workspace, workflow, plan, currentItem,
                 fileChangeRepository.findByTask(task.id()),
                 commandExecutionRepository.findByTask(task.id()),
                 validationRepository.findByTask(task.id()),

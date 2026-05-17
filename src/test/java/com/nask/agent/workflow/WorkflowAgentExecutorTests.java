@@ -14,11 +14,11 @@ import com.nask.agent.memory.ProjectMemoryService;
 import com.nask.agent.memory.MemoryWriteProposalService;
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.report.ReportService;
-import com.nask.agent.run.AgentRun;
-import com.nask.agent.run.AgentRunService;
 import com.nask.agent.runtime.FailureClassifier;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.runtime.UserInputRequestService;
+import com.nask.agent.task.CodingTask;
+import com.nask.agent.task.TaskService;
 import com.nask.agent.tool.ToolRecordRepository;
 import com.nask.agent.validation.ValidationService;
 import com.nask.agent.workspace.Workspace;
@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
 
 class WorkflowAgentExecutorTests {
     private final WorkflowService workflowService = mock(WorkflowService.class);
-    private final AgentRunService runService = mock(AgentRunService.class);
+    private final TaskService taskService = mock(TaskService.class);
     private final AgentStateAssembler stateAssembler = mock(AgentStateAssembler.class);
     private final ConditionEvaluator conditionEvaluator = mock(ConditionEvaluator.class);
     private final ReportService reportService = mock(ReportService.class);
@@ -52,10 +52,10 @@ class WorkflowAgentExecutorTests {
         var state = state(ids, run, workflow);
         var nodeExecutor = reportNodeExecutor();
         var nodeRegistry = mock(WorkflowNodeRegistry.class);
-        var executor = new WorkflowAgentExecutor(workflowService, runService, stateAssembler, nodeRegistry,
+        var executor = new WorkflowAgentExecutor(workflowService, taskService, stateAssembler, nodeRegistry,
                 conditionEvaluator, reportService);
-        when(runService.getRequired(ids.runId())).thenReturn(run);
-        when(workflowService.resolveForRun(run)).thenReturn(workflow);
+        when(taskService.getRequired(ids.runId())).thenReturn(run);
+        when(workflowService.resolveForTask(run)).thenReturn(workflow);
         when(workflowService.nodes(ids.runId())).thenReturn(List.of());
         when(stateAssembler.assemble(ids.runId())).thenReturn(state);
         when(nodeRegistry.get(Domain.WorkflowNodeType.REPORT.name())).thenReturn(nodeExecutor);
@@ -64,7 +64,7 @@ class WorkflowAgentExecutorTests {
 
         assertThatNoException().isThrownBy(() -> executor.execute(ids.runId()));
 
-        verify(runService).fail(ids.runId(), ids.taskId(),
+        verify(taskService).fail(ids.taskId(),
                 "Workflow execution failed: final report failed");
     }
 
@@ -76,7 +76,7 @@ class WorkflowAgentExecutorTests {
                 new AgentSettings(10, 20, 1000, 300, 3, 2, 2, 3, 120, 200000),
                 mock(FileChangeRepository.class), mock(CommandExecutionRepository.class),
                 mock(ToolRecordRepository.class), mock(RuntimeFailureService.class), new FailureClassifier(),
-                runService, mock(UserInputRequestService.class), mock(ProjectMemoryService.class),
+                taskService, mock(UserInputRequestService.class), mock(ProjectMemoryService.class),
                 mock(ProjectContextRetriever.class), mock(MemoryWriteProposalService.class));
     }
 
@@ -91,15 +91,16 @@ class WorkflowAgentExecutorTests {
                 "edges", List.of()), now, now);
     }
 
-    private AgentRun run(Ids ids) {
-        return new AgentRun(ids.runId(), ids.taskId(), "CODE_EDIT", Domain.AgentRunStatus.RUNNING.name(),
-                Instant.now(), null, null, Map.of("workflow", "coding-agent"));
+    private CodingTask run(Ids ids) {
+        var now = Instant.now();
+        return new CodingTask(ids.taskId(), ids.workspaceId(), null, 1, "task", "request",
+                Domain.TaskStatus.RUNNING.name(), "CODE_EDIT", now, null, null,
+                Map.of("workflow", "coding-agent"), now, now);
     }
 
-    private AgentState state(Ids ids, AgentRun run, WorkflowDefinition workflow) {
+    private AgentState state(Ids ids, CodingTask run, WorkflowDefinition workflow) {
         var now = Instant.now();
-        var task = new com.nask.agent.task.CodingTask(ids.taskId(), ids.workspaceId(), "task", "request",
-                Domain.TaskStatus.RUNNING.name(), now, now);
+        var task = run;
         var workspace = new Workspace(ids.workspaceId(), "workspace", "D:/tmp/workspace", true, List.of(), List.of(),
                 List.of(), now, now);
         return new AgentState(task, run, workspace, workflow, null, null, List.of(), List.of(), List.of(),
@@ -107,7 +108,8 @@ class WorkflowAgentExecutorTests {
     }
 
     private Ids ids() {
-        return new Ids(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        var taskId = UUID.randomUUID();
+        return new Ids(UUID.randomUUID(), taskId, taskId, UUID.randomUUID());
     }
 
     private record Ids(UUID workspaceId, UUID taskId, UUID runId, UUID workflowId) {

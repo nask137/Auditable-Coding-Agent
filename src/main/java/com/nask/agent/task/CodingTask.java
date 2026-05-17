@@ -1,6 +1,7 @@
 package com.nask.agent.task;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -13,6 +14,11 @@ import java.util.UUID;
  * @param title short display title
  * @param userRequest original user instruction
  * @param status lifecycle status from {@link com.nask.agent.common.Domain.TaskStatus}
+ * @param agentMode mode name used by the executor
+ * @param executionStartedAt execution start timestamp, if started
+ * @param executionFinishedAt terminal timestamp, if complete or failed
+ * @param failureReason terminal failure reason, if any
+ * @param runtimeMetadata implementation-specific details useful for audit/debugging
  * @param createdAt creation timestamp
  * @param updatedAt last status update timestamp
  */
@@ -24,10 +30,20 @@ public record CodingTask(
         String title,
         String userRequest,
         String status,
+        String agentMode,
+        Instant executionStartedAt,
+        Instant executionFinishedAt,
+        String failureReason,
+        Map<String, Object> runtimeMetadata,
         Instant createdAt,
         Instant updatedAt) {
     public CodingTask(UUID id, UUID workspaceId, String title, String userRequest, String status,
                       Instant createdAt, Instant updatedAt) {
-        this(id, workspaceId, null, 1, title, userRequest, status, createdAt, updatedAt);
+        this(id, workspaceId, null, 1, title, userRequest, status, null, null, null, null, Map.of(),
+                createdAt, updatedAt);
+    }
+
+    public UUID executionId() {
+        return id;
     }
 }

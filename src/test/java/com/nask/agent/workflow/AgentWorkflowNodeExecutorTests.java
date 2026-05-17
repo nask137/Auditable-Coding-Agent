@@ -22,14 +22,14 @@ import com.nask.agent.plan.PlanItem;
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.plan.PlanView;
 import com.nask.agent.report.ReportService;
-import com.nask.agent.run.AgentRun;
-import com.nask.agent.run.AgentRunService;
 import com.nask.agent.runtime.FailureClassifier;
 import com.nask.agent.runtime.RuntimeFailure;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.runtime.UserInputRequestService;
 import com.nask.agent.step.AgentStep;
 import com.nask.agent.step.AgentStepService;
+import com.nask.agent.task.CodingTask;
+import com.nask.agent.task.TaskService;
 import com.nask.agent.tool.ToolExecutionResult;
 import com.nask.agent.tool.ToolRecordRepository;
 import com.nask.agent.validation.ValidationService;
@@ -66,7 +66,7 @@ class AgentWorkflowNodeExecutorTests {
     private final ToolRecordRepository toolRecordRepository = mock(ToolRecordRepository.class);
     private final RuntimeFailureService runtimeFailureService = mock(RuntimeFailureService.class);
     private final FailureClassifier failureClassifier = new FailureClassifier();
-    private final AgentRunService runService = mock(AgentRunService.class);
+    private final TaskService taskService = mock(TaskService.class);
     private final UserInputRequestService userInputRequestService = mock(UserInputRequestService.class);
     private final ProjectMemoryService projectMemoryService = mock(ProjectMemoryService.class);
     private final ProjectContextRetriever projectContextRetriever = mock(ProjectContextRetriever.class);
@@ -74,7 +74,7 @@ class AgentWorkflowNodeExecutorTests {
     private final AgentWorkflowNodeExecutor executor = new AgentWorkflowNodeExecutor(stepService, actionService,
             planService, llmGateway, fileToolService, gitToolService, reportService, commandToolService,
             validationService, settings, fileChangeRepository, commandExecutionRepository, toolRecordRepository,
-            runtimeFailureService, failureClassifier, runService, userInputRequestService, projectMemoryService,
+            runtimeFailureService, failureClassifier, taskService, userInputRequestService, projectMemoryService,
             projectContextRetriever, memoryWriteProposalService);
 
     @Test
@@ -193,10 +193,10 @@ class AgentWorkflowNodeExecutorTests {
 
     private AgentState state(Ids ids, PlanView plan, PlanItem currentItem, Map<String, Object> transientData) {
         var now = Instant.now();
-        var task = new com.nask.agent.task.CodingTask(ids.taskId(), ids.workspaceId(), "task", "request",
-                Domain.TaskStatus.RUNNING.name(), now, now);
-        var run = new AgentRun(ids.runId(), ids.taskId(), "CODE_EDIT", Domain.AgentRunStatus.RUNNING.name(), now,
-                null, null, Map.of("workflow", "coding-agent"));
+        var task = new CodingTask(ids.taskId(), ids.workspaceId(), null, 1, "task", "request",
+                Domain.TaskStatus.RUNNING.name(), "CODE_EDIT", now, null, null,
+                Map.of("workflow", "coding-agent"), now, now);
+        var run = task;
         var workspace = new Workspace(ids.workspaceId(), "workspace", "D:/tmp/workspace", true, List.of(), List.of(),
                 List.of(), now, now);
         var workflow = new WorkflowDefinition(ids.workflowId(), "coding-agent", 1, "Coding",
@@ -233,7 +233,8 @@ class AgentWorkflowNodeExecutorTests {
     }
 
     private Ids ids() {
-        return new Ids(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        var taskId = UUID.randomUUID();
+        return new Ids(UUID.randomUUID(), taskId, taskId, UUID.randomUUID(), UUID.randomUUID());
     }
 
     private record Ids(UUID workspaceId, UUID taskId, UUID runId, UUID planId, UUID workflowId) {

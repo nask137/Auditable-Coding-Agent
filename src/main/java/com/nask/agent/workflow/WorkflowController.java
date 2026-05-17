@@ -1,7 +1,6 @@
 package com.nask.agent.workflow;
 
-import com.nask.agent.run.AgentRun;
-import com.nask.agent.run.AgentRunService;
+import com.nask.agent.task.TaskService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -17,11 +16,11 @@ import java.util.UUID;
 @RequestMapping("/api")
 public class WorkflowController {
     private final WorkflowService workflowService;
-    private final AgentRunService runService;
+    private final TaskService taskService;
 
-    public WorkflowController(WorkflowService workflowService, AgentRunService runService) {
+    public WorkflowController(WorkflowService workflowService, TaskService taskService) {
         this.workflowService = workflowService;
-        this.runService = runService;
+        this.taskService = taskService;
     }
 
     @GetMapping("/workflows")
@@ -34,19 +33,19 @@ public class WorkflowController {
         return workflowService.getDefinition(workflowId);
     }
 
-    @GetMapping("/runs/{runId}/workflow")
-    WorkflowDefinition runWorkflow(@PathVariable UUID runId) {
-        AgentRun run = runService.getRequired(runId);
-        return workflowService.resolveForRun(run);
+    @GetMapping("/tasks/{taskId}/workflow")
+    WorkflowDefinition taskWorkflow(@PathVariable UUID taskId) {
+        var task = taskService.getRequired(taskId);
+        return workflowService.resolveForTask(task);
     }
 
-    @GetMapping("/runs/{runId}/workflow/nodes")
-    List<WorkflowNodeExecution> nodes(@PathVariable UUID runId) {
-        return workflowService.nodes(runId);
+    @GetMapping("/tasks/{taskId}/workflow/nodes")
+    List<WorkflowNodeExecution> nodes(@PathVariable UUID taskId) {
+        return workflowService.nodes(taskId);
     }
 
-    @GetMapping("/runs/{runId}/workflow/edges")
-    List<WorkflowEdgeDecision> edges(@PathVariable UUID runId) {
-        return workflowService.edges(runId);
+    @GetMapping("/tasks/{taskId}/workflow/edges")
+    List<WorkflowEdgeDecision> edges(@PathVariable UUID taskId) {
+        return workflowService.edges(taskId);
     }
 }

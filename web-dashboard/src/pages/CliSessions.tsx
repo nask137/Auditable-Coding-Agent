@@ -28,7 +28,7 @@ export function CliSessions() {
           {error ? <div className="text-sm text-destructive">{error}</div> : (
             <Table>
               <thead>
-                <tr>{["Session", "Status", "Workspace", "Task", "Run", "Updated"].map((heading) => <Th key={heading}>{heading}</Th>)}</tr>
+                <tr>{["Session", "Status", "Workspace", "Task", "Updated"].map((heading) => <Th key={heading}>{heading}</Th>)}</tr>
               </thead>
               <tbody>
                 {sessions.map((session) => (
@@ -36,8 +36,7 @@ export function CliSessions() {
                     <Td>{session.sessionId}</Td>
                     <Td>{session.status || "-"}</Td>
                     <Td>{session.workspaceId || "-"}</Td>
-                    <Td>{session.taskId || "-"}</Td>
-                    <Td>{session.runId ? <Link className="text-primary underline" to={`/runs/${session.runId}${session.taskId ? `?taskId=${session.taskId}` : ""}`}>{session.runId}</Link> : "-"}</Td>
+                    <Td>{session.taskId ? <Link className="text-primary underline" to={`/tasks/${session.taskId}`}>{session.taskId}</Link> : "-"}</Td>
                     <Td>{session.updatedAt || "-"}</Td>
                   </tr>
                 ))}

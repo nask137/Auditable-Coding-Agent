@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -52,6 +53,11 @@ public class TaskService {
                 request.title() == null || request.title().isBlank() ? "Coding task" : request.title(),
                 request.userRequest(),
                 Domain.TaskStatus.CREATED.name(),
+                null,
+                null,
+                null,
+                null,
+                Map.of(),
                 now,
                 now);
         repository.insert(task);
@@ -84,11 +90,80 @@ public class TaskService {
     }
 
     /**
+     * Starts the task's single execution.
+     */
+    @Transactional
+    public CodingTask startExecution(CodingTask task, String workflowName) {
+        if (!Domain.TaskStatus.CREATED.name().equals(task.status())) {
+            throw new ApiException(HttpStatus.CONFLICT, "TASK_ALREADY_EXECUTED",
+                    "Task can only be started once: " + task.id());
+        }
+        var workflow = workflowName == null || workflowName.isBlank() ? "coding-agent" : workflowName;
+        var mode = switch (workflow) {
+            case "review-agent" -> "REVIEW";
+            case "test-agent" -> "TEST";
+            default -> "CODE_EDIT";
+        };
+        repository.startExecution(task.id(), mode, workflow, Instant.now());
+        auditService.append(AuditEventDraft.info(task.id(), task.executionId(), null,
+                Domain.AuditEventType.TaskExecutionStarted, Domain.AuditActor.RUNTIME, "Start task execution",
+                "Agent mode " + mode + " workflow " + workflow));
+        return getRequired(task.id());
+    }
+
+    /**
+     * Pauses task state until approval is resolved.
+     */
+    public void markWaitingApproval(UUID taskId) {
+        repository.updateExecutionStatus(taskId, Domain.TaskStatus.WAITING_APPROVAL, null);
+        auditService.append(AuditEventDraft.info(taskId, taskId, null, Domain.AuditEventType.TaskExecutionPaused,
+                Domain.AuditActor.RUNTIME, "Pause task execution", "Waiting for approval"));
+    }
+
+    /**
+     * Pauses task state until user input is supplied.
+     */
+    public void markWaitingUserInput(UUID taskId, String reason) {
+        repository.updateExecutionStatus(taskId, Domain.TaskStatus.WAITING_USER_INPUT, null);
+        auditService.append(AuditEventDraft.info(taskId, taskId, null, Domain.AuditEventType.TaskExecutionPaused,
+                Domain.AuditActor.RUNTIME, "Pause task execution", reason));
+    }
+
+    /**
+     * Returns a paused task to running state.
+     */
+    public void markRunning(UUID taskId) {
+        repository.updateExecutionStatus(taskId, Domain.TaskStatus.RUNNING, null);
+        auditService.append(AuditEventDraft.info(taskId, taskId, null, Domain.AuditEventType.TaskExecutionResumed,
+                Domain.AuditActor.RUNTIME, "Resume task execution", "Task returned to RUNNING"));
+    }
+
+    /**
+     * Marks the task completed and writes a terminal audit event.
+     */
+    public void complete(UUID taskId) {
+        repository.updateExecutionStatus(taskId, Domain.TaskStatus.COMPLETED, null);
+        auditService.append(AuditEventDraft.info(taskId, taskId, null, Domain.AuditEventType.AgentFinished,
+                Domain.AuditActor.RUNTIME, "Finish task execution", "Task completed"));
+    }
+
+    /**
+     * Marks the task failed with a durable reason and audit event.
+     */
+    public void fail(UUID taskId, String reason) {
+        repository.updateExecutionStatus(taskId, Domain.TaskStatus.FAILED, reason);
+        auditService.append(new AuditEventDraft(taskId, taskId, null, null, Domain.AuditEventType.AgentFailed,
+                Domain.AuditActor.RUNTIME, Domain.AuditLevel.ERROR, "Fail task execution", reason,
+                java.util.List.of(), null, null, null, null, null, Domain.RiskLevel.MEDIUM,
+                null, false, "TASK_EXECUTION_FAILED", reason, Map.of()));
+    }
+
+    /**
      * Cancels a task and writes an audit event.
      */
     public CodingTask cancel(UUID taskId) {
         var task = getRequired(taskId);
-        updateStatus(taskId, Domain.TaskStatus.CANCELLED);
+        repository.updateExecutionStatus(taskId, Domain.TaskStatus.CANCELLED, null);
         auditService.append(AuditEventDraft.info(task.id(), null, null, Domain.AuditEventType.TaskCancelled,
                 Domain.AuditActor.USER, "Cancel task", "Task cancelled"));
         return getRequired(taskId);
@@ -102,3 +177,4 @@ public class TaskService {
         return text.length() <= 60 ? text : text.substring(0, 57) + "...";
     }
 }
+

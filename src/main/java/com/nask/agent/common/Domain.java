@@ -18,13 +18,6 @@ public final class Domain {
     }
 
     /**
-     * Status of a concrete agent attempt for a task.
-     */
-    public enum AgentRunStatus {
-        RUNNING, WAITING_APPROVAL, WAITING_USER_INPUT, COMPLETED, FAILED, CANCELLED
-    }
-
-    /**
      * Lifecycle of the generated plan for a run.
      */
     public enum PlanStatus {
@@ -93,10 +86,10 @@ public final class Domain {
     public enum AuditEventType {
         TaskCreated,
         TaskCancelled,
-        AgentRunStarted,
-        AgentRunPaused,
-        AgentRunResumed,
-        AgentRunFailed,
+        TaskExecutionStarted,
+        TaskExecutionPaused,
+        TaskExecutionResumed,
+        TaskExecutionFailed,
         TaskUnderstood,
         PlanCreated,
         PlanUpdated,
@@ -389,3 +382,4 @@ public final class Domain {
         RUNNING, SUCCESS, FAILURE, BLOCKED, WAITING_APPROVAL, WAITING_USER_INPUT, FINISHED
     }
 }
+

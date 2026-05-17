@@ -10,6 +10,7 @@ import com.nask.agent.llm.ReportContext;
 import com.nask.agent.memory.ProjectMemoryRepository;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.task.CodingTask;
+import com.nask.agent.tool.ToolRecordRepository;
 import com.nask.agent.workflow.WorkflowService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class ReportService {
     private final WorkflowService workflowService;
     private final ProjectMemoryRepository projectMemoryRepository;
     private final ConversationService conversationService;
+    private final ToolRecordRepository toolRecordRepository;
 
     /**
      * Creates a report service.
@@ -38,7 +40,8 @@ public class ReportService {
     public ReportService(TaskReportRepository repository, LlmGateway llmGateway,
                          FileChangeRepository fileChangeRepository, AuditService auditService,
                          RuntimeFailureService runtimeFailureService, WorkflowService workflowService,
-                         ProjectMemoryRepository projectMemoryRepository, ConversationService conversationService) {
+                         ProjectMemoryRepository projectMemoryRepository, ConversationService conversationService,
+                         ToolRecordRepository toolRecordRepository) {
         this.repository = repository;
         this.llmGateway = llmGateway;
         this.fileChangeRepository = fileChangeRepository;
@@ -47,6 +50,7 @@ public class ReportService {
         this.workflowService = workflowService;
         this.projectMemoryRepository = projectMemoryRepository;
         this.conversationService = conversationService;
+        this.toolRecordRepository = toolRecordRepository;
     }
 
     /**
@@ -62,6 +66,7 @@ public class ReportService {
         var retrievals = projectMemoryRepository.findMemoryRetrievalsByRun(runId);
         var proposals = projectMemoryRepository.findMemoryWriteProposalsByRun(runId);
         var previousTasks = conversationService.previousTaskContext(task.conversationId(), task.id(), 5);
+        var recentToolObservations = toolRecordRepository.findRecentSummariesByRun(runId, 8);
         var workflowSummaries = workflowNodes.stream()
                 .filter(node -> node.outputSummary() != null && !node.outputSummary().isBlank())
                 .map(node -> "%s %s - %s".formatted(node.nodeId(), node.status(), compact(node.outputSummary(), 180)))
@@ -69,7 +74,8 @@ public class ReportService {
         var changedFiles = changes.stream().map(change -> change.path()).distinct().toList();
         var previousPrompts = previousTasks.stream().map(previous -> compact(previous.prompt(), 300)).toList();
         FinalReportDraft draft = llmGateway.generateReport(new ReportContext(task.id(), runId,
-                task.userRequest(), resultSummary, workflowSummaries, changedFiles, previousPrompts));
+                task.userRequest(), resultSummary, workflowSummaries, changedFiles, previousPrompts,
+                recentToolObservations));
         // The LLM drafts the narrative, while deterministic sections append the
         // exact file-change and audit trails stored by the runtime.
         var content = deterministicSummary(task, resultSummary, workflowSummaries, changedFiles, previousPrompts)

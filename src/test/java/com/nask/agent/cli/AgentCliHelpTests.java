@@ -14,7 +14,7 @@ class AgentCliHelpTests {
         assertHelp("tui", "--help");
         assertHelp("workspace", "--help");
         assertHelp("command", "--help");
-        assertHelp("run", "--help");
+        assertHelp("task", "--help");
     }
 
     private static void assertHelp(String... args) {

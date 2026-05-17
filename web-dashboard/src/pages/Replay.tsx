@@ -21,13 +21,11 @@ const replayTypeLabels: Record<string, string> = {
 };
 
 export function Replay() {
-  const [runId, setRunId] = useState("");
   const [taskId, setTaskId] = useState("");
   const [filter, setFilter] = useState("all");
   const tasks = useQuery({ queryKey: ["tasks"], queryFn: api.tasks });
-  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
-  const nodes = useQuery({ queryKey: ["replay-nodes", runId], queryFn: () => api.runWorkflowNodes(runId), enabled: Boolean(runId), retry: false });
-  const edges = useQuery({ queryKey: ["replay-edges", runId], queryFn: () => api.runWorkflowEdges(runId), enabled: Boolean(runId), retry: false });
+  const nodes = useQuery({ queryKey: ["replay-nodes", taskId], queryFn: () => api.taskWorkflowNodes(taskId), enabled: Boolean(taskId), retry: false });
+  const edges = useQuery({ queryKey: ["replay-edges", taskId], queryFn: () => api.taskWorkflowEdges(taskId), enabled: Boolean(taskId), retry: false });
   const events = useQuery({ queryKey: ["replay-events", taskId], queryFn: () => api.taskEvents(taskId), enabled: Boolean(taskId), retry: false });
   const changes = useQuery({ queryKey: ["replay-changes", taskId], queryFn: () => api.taskChanges(taskId), enabled: Boolean(taskId), retry: false });
   const failures = useQuery({ queryKey: ["replay-failures", taskId], queryFn: () => api.taskFailures(taskId), enabled: Boolean(taskId), retry: false });
@@ -49,21 +47,7 @@ export function Replay() {
     <div className="space-y-4">
       <Card>
         <CardHeader><CardTitle>回放输入</CardTitle></CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-[1fr_1fr_180px]">
-          <Select value={runId} onChange={(e) => {
-            setRunId(e.target.value);
-            const selected = runs.data?.find((run) => run.id === e.target.value);
-            if (selected?.taskId) {
-              setTaskId(selected.taskId);
-            }
-          }}>
-            <option value="">选择运行</option>
-            {runs.data?.map((run) => (
-              <option key={run.id} value={run.id}>
-                {compactId(run.id)} · {run.status} · {formatDate(run.startedAt)}
-              </option>
-            ))}
-          </Select>
+        <CardContent className="grid gap-3 md:grid-cols-[1fr_180px]">
           <Select value={taskId} onChange={(e) => setTaskId(e.target.value)}>
             <option value="">选择任务</option>
             {tasks.data?.map((task) => (
@@ -80,7 +64,7 @@ export function Replay() {
             <option value="change">文件变更</option>
             <option value="failure">失败记录</option>
           </Select>
-          {(runs.error || tasks.error) && <div className="md:col-span-3"><ErrorState error={runs.error || tasks.error} /></div>}
+          {tasks.error && <div className="md:col-span-2"><ErrorState error={tasks.error} /></div>}
         </CardContent>
       </Card>
 
@@ -102,7 +86,7 @@ export function Replay() {
                 </div>
               ))}
             </div>
-          ) : <EmptyState title="暂无回放数据" detail="选择运行和任务可查看完整回放。" />}
+          ) : <EmptyState title="暂无回放数据" detail="选择任务可查看完整回放。" />}
         </CardContent>
       </Card>
     </div>
