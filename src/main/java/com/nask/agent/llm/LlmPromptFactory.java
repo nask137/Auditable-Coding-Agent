@@ -185,26 +185,43 @@ public class LlmPromptFactory {
     }
 
     public LlmPrompt validationDecision(ValidationContext context) {
-        return new LlmPrompt("validation-decision-v1", SHARED_SYSTEM, """
+        return new LlmPrompt("validation-decision-v2", SHARED_SYSTEM, """
                 Return json with this exact shape:
                 {
-                  "shouldValidate": true,
-                  "executableAndArgs": ["mvn", "test"],
-                  "reason": "why this validation is appropriate"
+                  "shouldValidate": false,
+                  "executableAndArgs": [],
+                  "reason": "why validation should be skipped or which minimal validation is appropriate"
                 }
-                If no safe validation command is obvious, set shouldValidate to false and executableAndArgs to [].
+                Validation is risk-based, not mandatory. Set shouldValidate to false when no files changed in
+                this run, unless the user explicitly asked to run tests or validation.
+                Set shouldValidate to false for read-only review, search, explanation, planning, git status, or
+                diff-only work.
+                Set shouldValidate to true when source, test, build, configuration, migration, or runtime files
+                were created or modified, or when the task type is TEST.
+                Prefer the narrowest safe command that matches the changed files and project memory. Use the full
+                project test suite only when it is the appropriate minimal validation for the change.
                 The Runtime command policy and approval flow decide whether the command may run.
 
                 Task id: %s
                 Run id: %s
                 Workspace id: %s
+                Task type: %s
+                User request:
+                %s
+
+                Files changed in this run:
+                %s
+
+                Recent commands in this run:
+                %s
 
                 Runtime recovery notes:
                 %s
 
                 Project memory context:
                 %s
-                """.formatted(context.taskId(), context.runId(), context.workspaceId(), context.recoveryNotes(),
+                """.formatted(context.taskId(), context.runId(), context.workspaceId(), context.taskType(),
+                context.userRequest(), context.changedFiles(), context.recentCommands(), context.recoveryNotes(),
                 memorySummary(context.memoryContext())));
     }
 
@@ -215,13 +232,25 @@ public class LlmPromptFactory {
                   "markdown": "# Agent Run Report\\n\\n..."
                 }
                 Keep the report concise. Do not invent tool results.
+                Summarize the actual outcome for the terminal user. If the user asked about earlier context,
+                answer from the previous conversation prompts below.
 
                 User request:
                 %s
 
                 Runtime result summary:
                 %s
-                """.formatted(context.taskSummary(), context.resultSummary()));
+
+                Workflow outputs:
+                %s
+
+                Changed files:
+                %s
+
+                Previous prompts in this conversation, newest first:
+                %s
+                """.formatted(context.taskSummary(), context.resultSummary(), context.workflowSummaries(),
+                context.changedFiles(), context.previousConversationPrompts()));
     }
 
     private String memorySummary(com.nask.agent.memory.MemoryContext context) {

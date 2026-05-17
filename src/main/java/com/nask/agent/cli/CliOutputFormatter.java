@@ -32,10 +32,12 @@ class CliOutputFormatter {
                 Session: %s
                 Base URL: %s
                 Permission: %s
-                Workspace: %s
+                Workspace ID: %s
+                Conversation: %s
                 Task: %s %s
                 Run: %s %s
                 """.formatted(sessionId, baseUrl, permissionPreset, task.path("workspaceId").asText(""),
+                task.path("conversationId").asText(""),
                 task.path("id").asText(""), task.path("status").asText(""),
                 run.path("id").asText(""), run.path("status").asText(""));
     }
@@ -70,23 +72,116 @@ class CliOutputFormatter {
     }
 
     String diff(JsonNode timeline) {
-        var changes = timeline.path("changes");
+        return changes(timeline.path("changes"));
+    }
+
+    String changes(JsonNode changes) {
         if (!changes.isArray() || changes.isEmpty()) {
             return "No file changes recorded.";
         }
-        var builder = new StringBuilder();
+        var rows = new ArrayList<String[]>();
         for (var change : changes) {
-            builder.append("### ").append(change.path("path").asText(""))
-                    .append(" ").append(change.path("changeType").asText(""))
-                    .append(" +").append(change.path("lineAdded").asInt(0))
-                    .append(" -").append(change.path("lineDeleted").asInt(0)).append("\n");
-            var diff = change.path("diff").asText("");
-            if (!diff.isBlank()) {
-                builder.append(diff.length() > 2000 ? diff.substring(0, 2000) + "\n...diff truncated..." : diff)
-                        .append("\n");
-            }
+            rows.add(new String[]{
+                    change.path("changeType").asText(""),
+                    change.path("lineAdded").asText("0"),
+                    change.path("lineDeleted").asText("0"),
+                    oneLine(change.path("path").asText(""))
+            });
+        }
+        return table(List.of("Type", "+", "-", "Path"), rows)
+                + "Use --json on wrapper commands or the web UI for full diffs.\n";
+    }
+
+    String report(JsonNode report) {
+        if (report.isMissingNode() || report.isNull()) {
+            return "No report has been generated yet.";
+        }
+        var content = conciseReportContent(report.path("contentMd").asText(""));
+        if (content.isBlank()) {
+            content = "Report generated.";
+        }
+        return content.strip() + "\n\nDetails: workflow, audit trail, recovery records, and raw validation output are available in the web UI or with --json.\n";
+    }
+
+    String finalSummary(JsonNode timeline) {
+        var builder = new StringBuilder();
+        var task = timeline.path("task");
+        var run = timeline.path("run");
+        builder.append("Task ").append(shortId(task.path("id").asText("")))
+                .append(" ").append(task.path("status").asText(""))
+                .append("; run ").append(shortId(run.path("id").asText("")))
+                .append(" ").append(run.path("status").asText("")).append("\n\n");
+        if (!task.path("conversationId").asText("").isBlank()) {
+            builder.append("Conversation ").append(shortId(task.path("conversationId").asText("")))
+                    .append("; prompt #").append(task.path("promptIndex").asText("")).append("\n\n");
+        }
+        builder.append(report(timeline.path("report")));
+        var changes = timeline.path("changes");
+        if (changes.isArray() && !changes.isEmpty()) {
+            builder.append("\n").append(changes(changes));
+        }
+        var failures = timeline.path("failures");
+        if (failures.isArray() && !failures.isEmpty()) {
+            builder.append("\nRecovery records: ").append(failures.size())
+                    .append(" recorded. Use /status, /plan, or the web UI for details.\n");
         }
         return builder.toString();
+    }
+
+    String events(JsonNode events) {
+        if (!events.isArray() || events.isEmpty()) {
+            return "No audit events.";
+        }
+        var counts = new java.util.LinkedHashMap<String, Integer>();
+        for (var event : events) {
+            var type = event.path("eventType").asText("");
+            counts.put(type, counts.getOrDefault(type, 0) + 1);
+        }
+        var rows = new ArrayList<String[]>();
+        counts.forEach((type, count) -> rows.add(new String[]{type, count.toString()}));
+        return table(List.of("Event", "Count"), rows)
+                + "Total events: " + events.size() + ". Use --json or the web UI for the full audit trail.\n";
+    }
+
+    String failures(JsonNode failures) {
+        if (!failures.isArray() || failures.isEmpty()) {
+            return "No runtime failures.";
+        }
+        var rows = new ArrayList<String[]>();
+        for (var failure : failures) {
+            rows.add(new String[]{
+                    failure.path("failureType").asText(""),
+                    failure.path("strategy").asText(""),
+                    oneLine(failure.path("summary").asText(""))
+            });
+        }
+        return table(List.of("Type", "Strategy", "Summary"), rows);
+    }
+
+    String workflowPath(JsonNode nodes, JsonNode edges) {
+        var rows = new ArrayList<String[]>();
+        if (nodes.isArray()) {
+            for (var node : nodes) {
+                rows.add(new String[]{
+                        node.path("nodeId").asText(""),
+                        node.path("status").asText(""),
+                        oneLine(node.path("outputSummary").asText(""))
+                });
+            }
+        }
+        var output = rows.isEmpty() ? "No workflow nodes.\n" : table(List.of("Node", "Status", "Summary"), rows);
+        var edgeCount = edges.isArray() ? edges.size() : 0;
+        return output + "Edges: " + edgeCount + ". Use --json or the web UI for transition reasons.\n";
+    }
+
+    String taskStatus(JsonNode task) {
+        return """
+                Task: %s
+                Workspace ID: %s
+                Status: %s
+                Request: %s
+                """.formatted(task.path("id").asText(""), task.path("workspaceId").asText(""),
+                task.path("status").asText(""), oneLine(task.path("userRequest").asText("")));
     }
 
     String timelineUpdate(JsonNode timeline, int eventOffset) {
@@ -105,14 +200,22 @@ class CliOutputFormatter {
                     .append(" ").append(last.path("status").asText(""))
                     .append(" - ").append(oneLine(last.path("outputSummary").asText(""))).append("\n");
         }
-        if (events.isArray()) {
-            for (int i = eventOffset; i < events.size(); i++) {
-                var event = events.get(i);
-                builder.append("- ").append(event.path("eventType").asText(""))
-                        .append(": ").append(oneLine(event.path("outputSummary").asText(""))).append("\n");
+        return builder.toString();
+    }
+
+    private static String conciseReportContent(String content) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+        var result = content;
+        for (var marker : List.of("\n## Project Context", "\n## File Changes", "\n## Failure and Recovery",
+                "\n## Workflow", "\n## Audit Events")) {
+            var index = result.indexOf(marker);
+            if (index >= 0) {
+                result = result.substring(0, index);
             }
         }
-        return builder.toString();
+        return result;
     }
 
     private static String table(List<String> headers, List<String[]> rows) {

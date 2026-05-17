@@ -72,6 +72,10 @@ public class StubLlmGateway implements LlmGateway {
      */
     @Override
     public ValidationDecision suggestValidation(ValidationContext context) {
+        if (!"TEST".equalsIgnoreCase(context.taskType()) && context.changedFiles().isEmpty()) {
+            return new ValidationDecision(false, List.of(),
+                    "Skip validation because this run made no file changes");
+        }
         return new ValidationDecision(true, List.of("java", "-version"), "Run a portable JVM smoke validation command");
     }
 
@@ -80,17 +84,27 @@ public class StubLlmGateway implements LlmGateway {
      */
     @Override
     public FinalReportDraft generateReport(ReportContext context) {
+        var previous = context.previousConversationPrompts().isEmpty()
+                ? "No previous prompt was found in this conversation."
+                : "Previous prompt: " + context.previousConversationPrompts().getFirst();
+        var outputs = context.workflowSummaries().isEmpty()
+                ? "No workflow outputs were recorded."
+                : String.join("\n", context.workflowSummaries().stream().map("- "::concat).toList());
         return new FinalReportDraft("""
                 # Agent Run Report
 
-                ## Task
+                ## Summary
+
+                Request: %s
+
+                Result: %s
 
                 %s
 
-                ## Result
+                ## Key Outputs
 
                 %s
-                """.formatted(context.taskSummary(), context.resultSummary()));
+                """.formatted(context.taskSummary(), context.resultSummary(), previous, outputs));
     }
 
     /**
