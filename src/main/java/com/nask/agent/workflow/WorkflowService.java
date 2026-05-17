@@ -119,12 +119,14 @@ public class WorkflowService {
         var nodes = switch (mode) {
             case REVIEW -> List.of(
                     node("inspect_workspace", Domain.WorkflowNodeType.WORKSPACE_INSPECTION),
+                    node("project_scan", Domain.WorkflowNodeType.PROJECT_SCAN),
                     node("project_memory", Domain.WorkflowNodeType.PROJECT_MEMORY),
                     node("code_understanding", Domain.WorkflowNodeType.CODE_UNDERSTANDING),
                     node("report", Domain.WorkflowNodeType.REPORT),
                     node("finish", Domain.WorkflowNodeType.FINISH));
             case TEST -> List.of(
                     node("inspect_workspace", Domain.WorkflowNodeType.WORKSPACE_INSPECTION),
+                    node("project_scan", Domain.WorkflowNodeType.PROJECT_SCAN),
                     node("project_memory", Domain.WorkflowNodeType.PROJECT_MEMORY),
                     node("validate", Domain.WorkflowNodeType.VALIDATION),
                     node("report", Domain.WorkflowNodeType.REPORT),
@@ -148,12 +150,14 @@ public class WorkflowService {
         };
         var edges = switch (mode) {
             case REVIEW -> List.of(
-                    edge("inspect_workspace", "project_memory", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("inspect_workspace", "project_scan", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("project_scan", "project_memory", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("project_memory", "code_understanding", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("code_understanding", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("report", "finish", Domain.WorkflowEdgeType.ON_SUCCESS));
             case TEST -> List.of(
-                    edge("inspect_workspace", "project_memory", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("inspect_workspace", "project_scan", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("project_scan", "project_memory", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("project_memory", "validate", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("validate", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("report", "finish", Domain.WorkflowEdgeType.ON_SUCCESS));

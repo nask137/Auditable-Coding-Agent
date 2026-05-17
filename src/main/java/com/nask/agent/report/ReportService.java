@@ -67,6 +67,7 @@ public class ReportService {
         var proposals = projectMemoryRepository.findMemoryWriteProposalsByRun(runId);
         var previousTasks = conversationService.previousTaskContext(task.conversationId(), task.id(), 5);
         var recentToolObservations = toolRecordRepository.findRecentSummariesByRun(runId, 8);
+        var projectContextForModel = projectContextForModel(profile, retrievals);
         var workflowSummaries = workflowNodes.stream()
                 .filter(node -> node.outputSummary() != null && !node.outputSummary().isBlank())
                 .map(node -> "%s %s - %s".formatted(node.nodeId(), node.status(), compact(node.outputSummary(), 180)))
@@ -75,7 +76,7 @@ public class ReportService {
         var previousPrompts = previousTasks.stream().map(previous -> compact(previous.prompt(), 300)).toList();
         FinalReportDraft draft = llmGateway.generateReport(new ReportContext(task.id(), runId,
                 task.userRequest(), resultSummary, workflowSummaries, changedFiles, previousPrompts,
-                recentToolObservations));
+                recentToolObservations, projectContextForModel));
         // The LLM drafts the narrative, while deterministic sections append the
         // exact file-change and audit trails stored by the runtime.
         var content = deterministicSummary(task, resultSummary, workflowSummaries, changedFiles, previousPrompts)
@@ -147,6 +148,23 @@ public class ReportService {
         }
         var normalized = value.replaceAll("\\s+", " ").trim();
         return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength - 3) + "...";
+    }
+
+    private List<String> projectContextForModel(com.nask.agent.memory.ProjectProfile profile,
+                                                List<com.nask.agent.memory.MemoryRetrieval> retrievals) {
+        var context = new java.util.ArrayList<String>();
+        if (profile != null) {
+            context.add("Project profile: %s; frameworks %s; build tools %s; test tools %s; docs %s"
+                    .formatted(profile.languageSummary(), profile.frameworks(), profile.buildTools(),
+                            profile.testTools(), profile.docsPaths()));
+        }
+        retrievals.stream()
+                .limit(3)
+                .map(retrieval -> "Retrieval: %s; query `%s`; sources %s"
+                        .formatted(retrieval.summary(), retrieval.queryText(),
+                                retrieval.resultRefs().stream().map(this::sourceRef).limit(8).toList()))
+                .forEach(context::add);
+        return context;
     }
 
     private String sourceRef(com.nask.agent.memory.SourceReference ref) {

@@ -70,10 +70,13 @@ class LlmPromptFactoryTests {
     void finalReportPromptIncludesToolObservations() {
         var prompt = prompts.finalReport(new ReportContext(UUID.randomUUID(), UUID.randomUUID(),
                 "这个项目是做什么的", "Task completed.", List.of("execute_plan_item SUCCESS - Read README.md"),
-                List.of(), List.of(), List.of("read_file success=true payload={content=# Auditable Coding Agent}")));
+                List.of(), List.of(), List.of("read_file success=true payload={content=# Auditable Coding Agent}"),
+                List.of("Project profile: Java; frameworks [Spring Boot]")));
 
         assertThat(prompt.user())
                 .contains("Recent tool observations")
-                .contains("Auditable Coding Agent");
+                .contains("Auditable Coding Agent")
+                .contains("Project context")
+                .contains("Spring Boot");
     }
 }
