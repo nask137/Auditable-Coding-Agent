@@ -42,7 +42,14 @@ class InteractiveTerminalSession {
         System.out.println("Auditable Agent TUI. Type /status, /workspace, /plan, /diff, /permissions, /resume, /new, /exit.");
         sessions.append("session_started", workspaceId, conversationId, taskId, runId, "", "session started");
         if (initialPrompt != null && !initialPrompt.isBlank()) {
-            submitPrompt(initialPrompt);
+            try {
+                submitPrompt(initialPrompt);
+            } catch (IllegalStateException e) {
+                System.out.println("Request failed: " + e.getMessage());
+            } catch (java.net.ConnectException e) {
+                System.out.println("Cannot connect to " + cli.effectiveBaseUrl()
+                        + ". Start the backend service or update --base-url.");
+            }
         }
         while (true) {
             System.out.print("agent> ");
@@ -54,12 +61,19 @@ class InteractiveTerminalSession {
                 continue;
             }
             var command = SlashCommand.parse(line);
-            if (command != null) {
-                if (handle(command)) {
-                    return;
+            try {
+                if (command != null) {
+                    if (handle(command)) {
+                        return;
+                    }
+                } else {
+                    submitPrompt(line);
                 }
-            } else {
-                submitPrompt(line);
+            } catch (IllegalStateException e) {
+                System.out.println("Request failed: " + e.getMessage());
+            } catch (java.net.ConnectException e) {
+                System.out.println("Cannot connect to " + cli.effectiveBaseUrl()
+                        + ". Start the backend service or update --base-url.");
             }
         }
     }
@@ -334,11 +348,7 @@ class InteractiveTerminalSession {
     }
 
     private void renderFinal(JsonNode timeline) {
-        var report = timeline.path("report");
-        if (!report.isMissingNode() && !report.isNull()) {
-            System.out.println(report.path("contentMd").asText(""));
-        }
-        System.out.println(formatter.diff(timeline));
+        System.out.println(formatter.finalSummary(timeline));
     }
 
     private void printStatus() throws Exception {
@@ -348,12 +358,12 @@ class InteractiveTerminalSession {
                     Session: %s
                     Base URL: %s
                     Permission: %s
-                    Workspace: %s
+                    Workspace ID: %s
                     Conversation: %s
                     Workspace root: %s
                     Run: none
                     """.formatted(sessions.sessionId(), cli.effectiveBaseUrl(), config.get("permission_preset"),
-                    valueOrUnset(workspaceId), valueOrUnset(conversationId), currentWorkspaceRoot()));
+                    unresolvedWorkspaceId(), valueOrUnset(conversationId), currentWorkspaceRoot()));
             return;
         }
         System.out.println(formatter.status(timeline, sessions.sessionId(), cli.effectiveBaseUrl(),
@@ -529,6 +539,12 @@ class InteractiveTerminalSession {
 
     private static String valueOrUnset(String value) {
         return value == null || value.isBlank() ? "<unset>" : value;
+    }
+
+    private String unresolvedWorkspaceId() {
+        return workspaceId == null || workspaceId.isBlank()
+                ? "<unresolved; submit a prompt to resolve/register current directory>"
+                : workspaceId;
     }
 
     @FunctionalInterface
