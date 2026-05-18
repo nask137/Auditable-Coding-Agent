@@ -45,4 +45,8 @@ public record NodeExecutionResult(
     public static NodeExecutionResult failure(String summary) {
         return new NodeExecutionResult("FAILURE", summary, Map.of(), null, null, null, null);
     }
+
+    public static NodeExecutionResult failure(String summary, Map<String, Object> payload) {
+        return new NodeExecutionResult("FAILURE", summary, payload == null ? Map.of() : payload, null, null, null, null);
+    }
 }

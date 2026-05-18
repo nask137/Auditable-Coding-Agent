@@ -2,6 +2,7 @@ package com.nask.agent.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nask.agent.common.TaskIntentClassifier;
 
 import java.nio.charset.Charset;
 import java.nio.file.Path;
@@ -581,7 +582,7 @@ class InteractiveTerminalSession {
         if ("coding-agent".equals(workflow) && looksLikeReviewOnly(prompt)) {
             return "review-agent";
         }
-        return workflow;
+        return TaskIntentClassifier.defaultWorkflowFor(workflow, prompt);
     }
 
     static boolean looksLikeReviewOnly(String prompt) {

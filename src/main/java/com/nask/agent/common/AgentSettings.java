@@ -25,6 +25,7 @@ public class AgentSettings {
     private final int projectScanMaxFiles;
     private final int projectScanMaxFileBytes;
     private final int projectScanMaxTotalBytes;
+    private final int conversationContextMaxBytes;
 
     /**
      * Test-friendly constructor preserving the phase 1 parameter list.
@@ -32,7 +33,7 @@ public class AgentSettings {
     public AgentSettings(int maxSteps, int maxToolCalls, int maxFileChanges, int maxPatchLines,
                          int maxConsecutiveFailures, int commandTimeoutSeconds, int maxReadBytes) {
         this(maxSteps, maxToolCalls, maxFileChanges, maxPatchLines, maxConsecutiveFailures,
-                2, 2, 3, commandTimeoutSeconds, maxReadBytes, 2000, 262144, 10485760);
+                2, 2, 3, commandTimeoutSeconds, maxReadBytes, 2000, 262144, 10485760, 512000);
     }
 
     /**
@@ -43,7 +44,16 @@ public class AgentSettings {
                          int maxUserInputRequestsPerRun, int commandTimeoutSeconds, int maxReadBytes) {
         this(maxSteps, maxToolCalls, maxFileChanges, maxPatchLines, maxConsecutiveFailures, maxModelRetries,
                 maxReplanAttempts, maxUserInputRequestsPerRun, commandTimeoutSeconds, maxReadBytes,
-                2000, 262144, 10485760);
+                2000, 262144, 10485760, 512000);
+    }
+
+    public AgentSettings(int maxSteps, int maxToolCalls, int maxFileChanges, int maxPatchLines,
+                         int maxConsecutiveFailures, int maxModelRetries, int maxReplanAttempts,
+                         int maxUserInputRequestsPerRun, int commandTimeoutSeconds, int maxReadBytes,
+                         int projectScanMaxFiles, int projectScanMaxFileBytes, int projectScanMaxTotalBytes) {
+        this(maxSteps, maxToolCalls, maxFileChanges, maxPatchLines, maxConsecutiveFailures, maxModelRetries,
+                maxReplanAttempts, maxUserInputRequestsPerRun, commandTimeoutSeconds, maxReadBytes,
+                projectScanMaxFiles, projectScanMaxFileBytes, projectScanMaxTotalBytes, 512000);
     }
 
     /**
@@ -63,7 +73,8 @@ public class AgentSettings {
             @Value("${agent.file.max-read-bytes:200000}") int maxReadBytes,
             @Value("${agent.project-scan.max-files:2000}") int projectScanMaxFiles,
             @Value("${agent.project-scan.max-file-bytes:262144}") int projectScanMaxFileBytes,
-            @Value("${agent.project-scan.max-total-bytes:10485760}") int projectScanMaxTotalBytes) {
+            @Value("${agent.project-scan.max-total-bytes:10485760}") int projectScanMaxTotalBytes,
+            @Value("${agent.conversation.context-max-bytes:512000}") int conversationContextMaxBytes) {
         this.maxSteps = maxSteps;
         this.maxToolCalls = maxToolCalls;
         this.maxFileChanges = maxFileChanges;
@@ -77,6 +88,7 @@ public class AgentSettings {
         this.projectScanMaxFiles = projectScanMaxFiles;
         this.projectScanMaxFileBytes = projectScanMaxFileBytes;
         this.projectScanMaxTotalBytes = projectScanMaxTotalBytes;
+        this.conversationContextMaxBytes = conversationContextMaxBytes;
     }
 
     /**
@@ -168,5 +180,12 @@ public class AgentSettings {
      */
     public int projectScanMaxTotalBytes() {
         return projectScanMaxTotalBytes;
+    }
+
+    /**
+     * Maximum UTF-8 bytes of conversation history sent to task understanding.
+     */
+    public int conversationContextMaxBytes() {
+        return conversationContextMaxBytes;
     }
 }

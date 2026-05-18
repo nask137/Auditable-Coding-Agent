@@ -293,8 +293,10 @@ public class FileToolService {
             if (!before.contains(oldText)) {
                 // Exact matching prevents accidental broad edits when the model's
                 // view of the file is stale.
-                failTool(call.id(), "Patch oldText not found");
-                return ToolExecutionResult.blocked("Patch oldText not found: " + check.relativePath());
+                var summary = "Patch oldText not found in existing file: " + check.relativePath()
+                        + " (read " + before.length() + " chars)";
+                failTool(call.id(), summary);
+                return ToolExecutionResult.blocked(summary);
             }
             var after = before.replace(oldText, newText);
             var added = diffSupport.addedLines(before, after);

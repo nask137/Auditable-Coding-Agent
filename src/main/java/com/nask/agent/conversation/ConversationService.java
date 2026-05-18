@@ -14,6 +14,8 @@ import java.util.UUID;
  */
 @Service
 public class ConversationService {
+
+    private static final int DEFAULT_REPORT_EXCERPT_BYTES = 1200;
     private final ConversationRepository repository;
     private final WorkspaceService workspaceService;
 
@@ -70,10 +72,16 @@ public class ConversationService {
     }
 
     public List<ConversationTaskContext> previousTaskContext(UUID conversationId, UUID currentTaskId, int limit) {
+        return previousTaskContext(conversationId, currentTaskId, limit,
+                Math.max(1, limit) * DEFAULT_REPORT_EXCERPT_BYTES);
+    }
+
+    public List<ConversationTaskContext> previousTaskContext(UUID conversationId, UUID currentTaskId, int limit,
+                                                             int contextFetchMaxBytes) {
         if (conversationId == null) {
             return List.of();
         }
-        return repository.previousTaskContext(conversationId, currentTaskId, limit);
+        return repository.previousTaskContext(conversationId, currentTaskId, limit, contextFetchMaxBytes);
     }
 
     private String truncate(String value, int maxLength) {
