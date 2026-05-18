@@ -45,10 +45,6 @@ class CliLocalConfig {
         values.put(key, value == null ? "" : value);
     }
 
-    Path sessionsDir() {
-        return home.resolve("sessions");
-    }
-
     void save() throws IOException {
         Files.createDirectories(home);
         var builder = new StringBuilder();

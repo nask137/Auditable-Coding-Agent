@@ -35,24 +35,31 @@ class WorkspaceIgnoreServiceTests {
     void computesIgnoredPrefixesFromGitExcludeStandard() throws Exception {
         requireGit();
         runGit("init");
-        Files.writeString(workspaceRoot.resolve(".gitignore"), "target/\nnode_modules/\n");
+        Files.writeString(workspaceRoot.resolve(".gitignore"), "target/\nnode_modules/\nsrc/secret.txt\n.env\n");
         Files.createDirectories(workspaceRoot.resolve("target/classes"));
         Files.createDirectories(workspaceRoot.resolve("web/node_modules/pkg"));
+        Files.createDirectories(workspaceRoot.resolve("src"));
         Files.writeString(workspaceRoot.resolve("target/classes/App.class"), "compiled");
         Files.writeString(workspaceRoot.resolve("web/node_modules/pkg/index.js"), "dependency");
+        Files.writeString(workspaceRoot.resolve("web/keep.txt"), "keep");
+        Files.writeString(workspaceRoot.resolve("src/secret.txt"), "secret");
+        Files.writeString(workspaceRoot.resolve("src/keep.txt"), "keep");
+        Files.writeString(workspaceRoot.resolve(".env"), "secret");
         Files.writeString(workspaceRoot.resolve("README.md"), "read me");
 
         var view = service.ignoreView(workspace());
 
         assertThat(view.source()).isEqualTo("git_ls_files");
-        assertThat(view.ignoredPrefixes()).contains("target/classes/App.class/", "web/node_modules/pkg/index.js/");
-        assertThat(view.ignoredPrefixes()).doesNotContain("README.md/");
+        assertThat(view.ignoredFiles()).contains(".env", "src/secret.txt");
+        assertThat(view.ignoredPrefixes()).contains("target/", "web/node_modules/");
+        assertThat(view.ignoredPrefixes()).doesNotContain("README.md/", "src/secret.txt/");
     }
 
     @Test
     void returnsEmptyViewOutsideGitWorkspace() {
         var view = service.ignoreView(workspace());
 
+        assertThat(view.ignoredFiles()).isEmpty();
         assertThat(view.ignoredPrefixes()).isEmpty();
         assertThat(view.source()).isEqualTo("not_a_git_workspace");
     }

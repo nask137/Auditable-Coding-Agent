@@ -3,14 +3,14 @@ package com.nask.agent.cli;
 import java.time.Instant;
 
 /**
- * Summary of a local CLI transcript known to the backend process.
+ * Summary of a backend conversation shown in the CLI sessions dashboard.
  */
 public record CliSessionSummary(
-        String sessionId,
-        String workspaceId,
         String conversationId,
-        String runId,
-        String taskId,
-        String status,
+        String conversationTitle,
+        String workspaceId,
+        int taskCount,
+        String latestTaskId,
+        String latestTaskStatus,
         Instant updatedAt) {
 }

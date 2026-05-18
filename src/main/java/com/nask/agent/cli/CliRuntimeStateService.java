@@ -1,14 +1,13 @@
 package com.nask.agent.cli;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -17,10 +16,12 @@ import java.util.List;
 @Service
 public class CliRuntimeStateService {
     private final ObjectMapper mapper;
+    private final NamedParameterJdbcTemplate jdbc;
     private final Path home;
 
-    public CliRuntimeStateService(ObjectMapper mapper) {
+    public CliRuntimeStateService(ObjectMapper mapper, NamedParameterJdbcTemplate jdbc) {
         this.mapper = mapper;
+        this.jdbc = jdbc;
         this.home = Path.of(System.getProperty("user.home"), ".auditable-agent");
     }
 
@@ -67,44 +68,35 @@ public class CliRuntimeStateService {
     }
 
     public List<CliSessionSummary> sessions() throws IOException {
-        var dir = home.resolve("sessions");
-        if (!Files.isDirectory(dir)) {
-            return List.of();
-        }
-        try (var stream = Files.list(dir)) {
-            return stream.filter(path -> path.getFileName().toString().endsWith(".jsonl"))
-                    .map(this::readSession)
-                    .filter(java.util.Objects::nonNull)
-                    .sorted(Comparator.comparing(CliSessionSummary::updatedAt).reversed())
-                    .limit(50)
-                    .toList();
-        }
-    }
-
-    private CliSessionSummary readSession(Path path) {
-        try {
-            String last = null;
-            for (var line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
-                if (!line.isBlank()) {
-                    last = line;
-                }
-            }
-            if (last == null) {
-                return null;
-            }
-            var node = mapper.readTree(last);
-            var file = path.getFileName().toString();
-            var id = file.substring(0, file.length() - ".jsonl".length());
-            return new CliSessionSummary(id, text(node, "workspaceId"), text(node, "conversationId"), text(node, "runId"),
-                    text(node, "taskId"), text(node, "status"), Instant.parse(text(node, "timestamp")));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static String text(com.fasterxml.jackson.databind.JsonNode node, String field) {
-        var value = node.get(field);
-        return value == null || value.isNull() ? "" : value.asText();
+        return jdbc.query("""
+                select c.id as conversation_id,
+                       c.title as conversation_title,
+                       c.workspace_id,
+                       count(t.id)::int as task_count,
+                       latest.id as latest_task_id,
+                       latest.status as latest_task_status,
+                       c.updated_at
+                  from conversation c
+                  left join task t on t.conversation_id = c.id
+                  left join lateral (
+                    select id, status
+                      from task latest_task
+                     where latest_task.conversation_id = c.id
+                     order by latest_task.prompt_index desc, latest_task.created_at desc
+                     limit 1
+                  ) latest on true
+                 group by c.id, c.title, c.workspace_id, latest.id, latest.status, c.updated_at
+                 order by c.updated_at desc
+                 limit 50
+                """, (rs, rowNum) -> new CliSessionSummary(
+                rs.getObject("conversation_id", java.util.UUID.class).toString(),
+                rs.getString("conversation_title"),
+                rs.getObject("workspace_id", java.util.UUID.class).toString(),
+                rs.getInt("task_count"),
+                rs.getObject("latest_task_id", java.util.UUID.class) == null
+                        ? "" : rs.getObject("latest_task_id", java.util.UUID.class).toString(),
+                rs.getString("latest_task_status") == null ? "" : rs.getString("latest_task_status"),
+                rs.getObject("updated_at", java.time.OffsetDateTime.class).toInstant()));
     }
 
     private static String unquote(String value) {

@@ -39,7 +39,7 @@ class ProjectScannerTests {
                 2000, 16, 128);
         var ignoreService = mock(WorkspaceIgnoreService.class);
         when(ignoreService.ignoreView(any())).thenReturn(new WorkspaceIgnoreService.IgnoreView(
-                List.of("target/generated/Ignored.java/"), "test", 0));
+                List.of("target/generated/Ignored.java"), List.of(), "test", 0));
         var scanner = new ProjectScanner(new WorkspacePathGuard(), ignoreService, settings, new FileClassifier());
 
         var result = scanner.scan(workspace());

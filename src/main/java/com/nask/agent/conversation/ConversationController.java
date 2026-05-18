@@ -34,6 +34,11 @@ public class ConversationController {
         return service.create(request);
     }
 
+    @PostMapping("/{conversationId}/rename")
+    Conversation rename(@PathVariable UUID conversationId, @Valid @RequestBody RenameConversationRequest request) {
+        return service.rename(conversationId, request.title());
+    }
+
     @GetMapping("/{conversationId}")
     Conversation get(@PathVariable UUID conversationId) {
         return service.getRequired(conversationId);

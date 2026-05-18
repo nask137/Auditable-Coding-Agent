@@ -47,6 +47,8 @@ class FileToolServiceTests {
         Files.writeString(workspaceRoot.resolve("README.md"), "read me");
         Files.writeString(workspaceRoot.resolve("pom.xml"), "<project/>");
         Files.writeString(workspaceRoot.resolve("src/main/java/App.java"), "class App {}");
+        Files.writeString(workspaceRoot.resolve("src/main/java/secret.txt"), "secret");
+        Files.writeString(workspaceRoot.resolve(".env"), "secret");
         Files.writeString(workspaceRoot.resolve("target/classes/App.class"), "compiled");
         Files.writeString(workspaceRoot.resolve("web-dashboard/node_modules/package/index.js"), "dependency");
         Files.createDirectories(workspaceRoot.resolve(".git"));
@@ -55,7 +57,7 @@ class FileToolServiceTests {
                 UUID.randomUUID(), UUID.randomUUID(), "list_files", Domain.PermissionLevel.READ_ONLY.name(),
                 "List files", java.util.Map.of(), Domain.ToolCallStatus.RUNNING.name(), Instant.now(), null));
         when(ignoreService.ignoreView(any())).thenReturn(new WorkspaceIgnoreService.IgnoreView(
-                List.of("target/", "web-dashboard/node_modules/"), "test", 0));
+                List.of(".env", "src/main/java/secret.txt"), List.of("target/", "web-dashboard/node_modules/"), "test", 0));
     }
 
     @AfterEach
@@ -71,7 +73,7 @@ class FileToolServiceTests {
         assertThat(result.payload().get("files"))
                 .asList()
                 .contains("README.md", "pom.xml", "src/main/java/App.java")
-                .doesNotContain(".git/config", "target/classes/App.class",
+                .doesNotContain(".env", ".git/config", "src/main/java/secret.txt", "target/classes/App.class",
                         "web-dashboard/node_modules/package/index.js");
     }
 

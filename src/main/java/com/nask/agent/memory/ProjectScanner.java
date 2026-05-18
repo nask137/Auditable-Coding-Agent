@@ -88,6 +88,7 @@ public class ProjectScanner {
         return new ProjectScanResult(List.copyOf(state.observations), state.filesSeen, state.observations.size(),
                 state.filesSkipped, summary, Map.of(
                 "ignoreSource", ignoreView.source(),
+                "ignoredFiles", ignoreView.ignoredFiles(),
                 "ignoredPrefixes", ignoreView.ignoredPrefixes(),
                 "maxFiles", settings.projectScanMaxFiles(),
                 "maxFileBytes", settings.projectScanMaxFileBytes(),
@@ -120,7 +121,7 @@ public class ProjectScanner {
             }
             var prefix = relative.endsWith("/") ? relative : relative + "/";
             for (var ignoredPrefix : ignoreView.ignoredPrefixes()) {
-                if (ignoredPrefix.equals(prefix) || ignoredPrefix.startsWith(prefix)) {
+                if (prefix.equals(ignoredPrefix) || prefix.startsWith(ignoredPrefix)) {
                     return true;
                 }
             }
@@ -135,6 +136,11 @@ public class ProjectScanner {
                 return;
             }
             var relative = root.relativize(file).toString().replace('\\', '/');
+            if (shouldSkipFile(relative)) {
+                filesSkipped++;
+                skippedReasons.merge("ignored_file:" + relative, 1, Integer::sum);
+                return;
+            }
             var type = fileClassifier.classify(relative);
             var size = attrs.size();
             var content = "";
@@ -150,6 +156,18 @@ public class ProjectScanner {
                 }
             }
             observations.add(new ProjectScanObservation(relative, type, size, read, content));
+        }
+
+        private boolean shouldSkipFile(String relative) {
+            if (ignoreView.ignoredFiles().contains(relative)) {
+                return true;
+            }
+            for (var ignoredPrefix : ignoreView.ignoredPrefixes()) {
+                if (relative.startsWith(ignoredPrefix)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private boolean shouldRead(com.nask.agent.common.Domain.ProjectFileType type, String relative, long size) {

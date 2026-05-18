@@ -3,6 +3,7 @@ package com.nask.agent.llm;
 import org.junit.jupiter.api.Test;
 
 import com.nask.agent.common.Domain;
+import com.nask.agent.conversation.ConversationTaskContext;
 import com.nask.agent.plan.PlanItem;
 
 import java.time.Instant;
@@ -78,5 +79,24 @@ class LlmPromptFactoryTests {
                 .contains("Auditable Coding Agent")
                 .contains("Project context")
                 .contains("Spring Boot");
+    }
+
+    @Test
+    void taskUnderstandingUsesCompactConversationOrientationWithoutOldReports() {
+        var oldReport = "OLD_REPORT_DETAIL ".repeat(200);
+        var previousTask = new ConversationTaskContext(UUID.randomUUID(),
+                "previously update README and run validation", "COMPLETED", oldReport,
+                List.of("README.md"), Instant.now());
+
+        var prompt = prompts.taskUnderstanding(new TaskContext(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), "now inspect command policy", List.of(),
+                List.of(previousTask)));
+
+        assertThat(prompt.user())
+                .contains("lightweight orientation")
+                .contains("previously update README")
+                .contains("Affected files: [README.md]")
+                .doesNotContain("Final report")
+                .doesNotContain("OLD_REPORT_DETAIL");
     }
 }

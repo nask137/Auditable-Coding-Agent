@@ -59,6 +59,18 @@ public class ConversationRepository {
                 new MapSqlParameterSource("id", id));
     }
 
+    public Conversation updateTitle(UUID id, String title) {
+        jdbc.update("""
+                update conversation
+                   set title = :title,
+                       updated_at = now()
+                 where id = :id
+                """, new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("title", title));
+        return findById(id).orElseThrow();
+    }
+
     public int nextTaskIndex(UUID conversationId) {
         return jdbc.queryForObject("""
                 select coalesce(max(prompt_index), 0) + 1
@@ -80,7 +92,7 @@ public class ConversationRepository {
                        ) as affected_files
                   from task t
                   left join lateral (
-                    select content_md
+                    select substring(content_md from 1 for 1200) as content_md
                       from task_report tr
                      where tr.task_id = t.id
                      order by tr.created_at desc
