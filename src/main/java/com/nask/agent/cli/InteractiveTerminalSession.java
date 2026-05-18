@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.charset.Charset;
 import java.nio.file.Path;
+import java.util.InputMismatchException;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.UUID;
@@ -21,7 +22,7 @@ class InteractiveTerminalSession {
     private final ObjectMapper mapper;
     private final CliLocalConfig config;
     private final CliOutputFormatter formatter;
-    private final Scanner scanner = new Scanner(System.in, inputCharset());
+    private final Scanner scanner;
     private String workspaceId = "";
     private String conversationId = "";
     private String conversationTitle = "";
@@ -29,6 +30,10 @@ class InteractiveTerminalSession {
     private int renderedEvents;
 
     InteractiveTerminalSession(AgentCli cli, boolean rawJson) {
+        this(cli, rawJson, new Scanner(System.in, inputCharset()));
+    }
+
+    InteractiveTerminalSession(AgentCli cli, boolean rawJson, Scanner scanner) {
         this.cli = cli;
         this.mapper = cli.mapper;
         this.config = CliLocalConfig.load();
@@ -36,6 +41,7 @@ class InteractiveTerminalSession {
             config.set("base_url", cli.baseUrl);
         }
         this.formatter = new CliOutputFormatter(mapper, rawJson);
+        this.scanner = scanner;
     }
 
     void run(String initialPrompt) throws Exception {
@@ -525,9 +531,23 @@ class InteractiveTerminalSession {
         if (registered != null) {
             return registered;
         }
+        confirmTrustedWorkspaceRegistration(root);
         var created = mapper.readTree(cli.post("/api/workspaces",
                 Map.of("rootPath", root.toString(), "trusted", true)));
         return created.path("id").asText();
+    }
+
+    private void confirmTrustedWorkspaceRegistration(Path root) {
+        System.out.println("No workspace is registered for the current directory:");
+        System.out.println(root);
+        System.out.print("Register this directory as a trusted workspace? Type yes to continue: ");
+        if (!scanner.hasNextLine()) {
+            throw new InputMismatchException("Workspace registration requires explicit confirmation");
+        }
+        var answer = scanner.nextLine().strip();
+        if (!"yes".equalsIgnoreCase(answer)) {
+            throw new InputMismatchException("Workspace registration cancelled");
+        }
     }
 
     static String findWorkspaceIdByRoot(JsonNode workspaces, Path root) {

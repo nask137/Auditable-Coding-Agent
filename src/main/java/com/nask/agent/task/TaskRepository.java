@@ -80,8 +80,8 @@ public class TaskRepository {
     /**
      * Starts the single execution attached to a task.
      */
-    public void startExecution(UUID id, String agentMode, String workflowName, Instant startedAt) {
-        jdbc.update("""
+    public boolean startExecution(UUID id, String agentMode, String workflowName, Instant startedAt) {
+        var updated = jdbc.update("""
                 update task
                    set agent_mode = :agentMode,
                        status = :status,
@@ -91,14 +91,17 @@ public class TaskRepository {
                        runtime_metadata = cast(:runtimeMetadata as jsonb),
                        updated_at = :startedAt
                  where id = :id
+                   and status = :createdStatus
                 """, new MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("agentMode", agentMode)
                 .addValue("status", Domain.TaskStatus.RUNNING.name())
+                .addValue("createdStatus", Domain.TaskStatus.CREATED.name())
                 .addValue("startedAt", ts(startedAt))
                 .addValue("runtimeMetadata", json.toJson(java.util.Map.of(
                         "loop", "phase3-workflow",
                         "workflow", workflowName))));
+        return updated == 1;
     }
 
     /**

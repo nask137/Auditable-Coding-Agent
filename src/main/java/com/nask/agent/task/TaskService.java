@@ -104,11 +104,16 @@ public class TaskService {
             case "test-agent" -> "TEST";
             default -> "CODE_EDIT";
         };
-        repository.startExecution(task.id(), mode, workflow, Instant.now());
-        auditService.append(AuditEventDraft.info(task.id(), task.executionId(), null,
+        var started = repository.startExecution(task.id(), mode, workflow, Instant.now());
+        if (!started) {
+            throw new ApiException(HttpStatus.CONFLICT, "TASK_ALREADY_EXECUTED",
+                    "Task can only be started once: " + task.id());
+        }
+        var updated = getRequired(task.id());
+        auditService.append(AuditEventDraft.info(updated.id(), updated.executionId(), null,
                 Domain.AuditEventType.TaskExecutionStarted, Domain.AuditActor.RUNTIME, "Start task execution",
                 "Agent mode " + mode + " workflow " + workflow));
-        return getRequired(task.id());
+        return updated;
     }
 
     /**
