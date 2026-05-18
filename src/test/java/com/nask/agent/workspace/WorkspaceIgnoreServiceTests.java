@@ -64,8 +64,34 @@ class WorkspaceIgnoreServiceTests {
         assertThat(view.source()).isEqualTo("not_a_git_workspace");
     }
 
+    @Test
+    void computesIgnoredPathsForWorkspaceNestedInsideGitRoot() throws Exception {
+        requireGit();
+        runGit("init");
+        Files.writeString(workspaceRoot.resolve(".gitignore"), "app/target/\napp/src/secret.txt\nother/ignored/\n");
+        var nestedWorkspace = workspaceRoot.resolve("app");
+        Files.createDirectories(nestedWorkspace.resolve("target/classes"));
+        Files.createDirectories(nestedWorkspace.resolve("src"));
+        Files.createDirectories(workspaceRoot.resolve("other/ignored"));
+        Files.writeString(nestedWorkspace.resolve("target/classes/App.class"), "compiled");
+        Files.writeString(nestedWorkspace.resolve("src/secret.txt"), "secret");
+        Files.writeString(nestedWorkspace.resolve("src/keep.txt"), "keep");
+        Files.writeString(workspaceRoot.resolve("other/ignored/file.txt"), "outside workspace");
+
+        var view = service.ignoreView(workspace(nestedWorkspace));
+
+        assertThat(view.source()).isEqualTo("git_ls_files");
+        assertThat(view.ignoredFiles()).contains("src/secret.txt");
+        assertThat(view.ignoredPrefixes()).contains("target/");
+        assertThat(view.ignoredPrefixes()).doesNotContain("app/target/", "other/ignored/");
+    }
+
     private Workspace workspace() {
-        return new Workspace(UUID.randomUUID(), "workspace", workspaceRoot.toString(), true,
+        return workspace(workspaceRoot);
+    }
+
+    private Workspace workspace(Path root) {
+        return new Workspace(UUID.randomUUID(), "workspace", root.toString(), true,
                 List.of("FILE_READ", "FILE_CREATE", "FILE_MODIFY"), List.of(".git"),
                 List.of(".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519"),
                 Instant.now(), null);

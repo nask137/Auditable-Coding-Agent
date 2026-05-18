@@ -56,31 +56,50 @@ public class WorkspaceIgnoreService {
             return new IgnoreView(List.of(), "not_a_git_workspace", gitRoot.exitCode());
         }
         var repoRoot = Path.of(firstLine(gitRoot.output())).toAbsolutePath().normalize();
-        if (!repoRoot.startsWith(root)) {
+        if (!root.startsWith(repoRoot)) {
             return new IgnoreView(List.of(), "git_root_outside_workspace", gitRoot.exitCode());
         }
         var ignored = execute(repoRoot, List.of("ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"));
         if (ignored.exitCode() != 0) {
             return new IgnoreView(List.of(), List.of(), "git_ls_files_failed", ignored.exitCode());
         }
-        return collapseIgnoredPaths(repoRoot, parseNullSeparated(ignored.output()));
+        return collapseIgnoredPaths(repoRoot, root, parseNullSeparated(ignored.output()));
     }
 
-    private IgnoreView collapseIgnoredPaths(Path repoRoot, List<String> paths) {
+    private IgnoreView collapseIgnoredPaths(Path repoRoot, Path workspaceRoot, List<String> paths) {
         var files = new LinkedHashSet<String>();
         var directoryPrefixes = new LinkedHashSet<String>();
+        var workspacePrefix = normalize(repoRoot.relativize(workspaceRoot).toString());
         paths.stream()
                 .map(this::normalize)
-                .filter(path -> !path.isBlank())
+                .filter(path -> !path.isBlank() && isInsideWorkspace(path, workspacePrefix))
                 .sorted()
                 .forEach(path -> {
+                    var workspacePath = toWorkspaceRelative(path, workspacePrefix);
+                    if (workspacePath.isBlank()) {
+                        return;
+                    }
                     if (path.endsWith("/") || Files.isDirectory(repoRoot.resolve(path), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                        directoryPrefixes.add(path.endsWith("/") ? path : path + "/");
+                        directoryPrefixes.add(workspacePath.endsWith("/") ? workspacePath : workspacePath + "/");
                     } else {
-                        files.add(path);
+                        files.add(workspacePath);
                     }
                 });
         return new IgnoreView(collapseFiles(files, directoryPrefixes), collapsePrefixes(directoryPrefixes), "git_ls_files", 0);
+    }
+
+    private boolean isInsideWorkspace(String repoRelativePath, String workspacePrefix) {
+        return workspacePrefix.isBlank()
+                || repoRelativePath.equals(workspacePrefix)
+                || repoRelativePath.startsWith(workspacePrefix + "/");
+    }
+
+    private String toWorkspaceRelative(String repoRelativePath, String workspacePrefix) {
+        if (workspacePrefix.isBlank()) {
+            return repoRelativePath;
+        }
+        var workspacePath = repoRelativePath.substring(workspacePrefix.length());
+        return workspacePath.replaceAll("^/+", "");
     }
 
     private List<String> collapseFiles(LinkedHashSet<String> files, LinkedHashSet<String> directoryPrefixes) {

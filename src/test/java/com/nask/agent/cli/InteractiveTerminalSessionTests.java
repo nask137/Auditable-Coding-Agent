@@ -4,10 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.Scanner;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class InteractiveTerminalSessionTests {
     private final ObjectMapper mapper = new ObjectMapper();
@@ -56,7 +58,7 @@ class InteractiveTerminalSessionTests {
     void initializesWorkspaceByRegisteringCurrentDirectoryWhenMissing() throws Exception {
         var id = UUID.randomUUID().toString();
         var cli = new FakeAgentCli(mapper.createArrayNode().toString(), id);
-        var session = new InteractiveTerminalSession(cli, false);
+        var session = new InteractiveTerminalSession(cli, false, new Scanner("yes\n"));
 
         assertThat(session.initializeWorkspace()).isEqualTo(id);
         assertThat(cli.postCalls).isEqualTo(1);
@@ -66,6 +68,17 @@ class InteractiveTerminalSessionTests {
         assertThat(request)
                 .containsEntry("rootPath", Path.of("").toAbsolutePath().normalize().toString())
                 .containsEntry("trusted", true);
+    }
+
+    @Test
+    void refusesToRegisterCurrentDirectoryWithoutExplicitTrustConfirmation() {
+        var cli = new FakeAgentCli(mapper.createArrayNode().toString(), UUID.randomUUID().toString());
+        var session = new InteractiveTerminalSession(cli, false, new Scanner("no\n"));
+
+        assertThatThrownBy(session::initializeWorkspace)
+                .isInstanceOf(java.util.InputMismatchException.class)
+                .hasMessageContaining("cancelled");
+        assertThat(cli.postCalls).isZero();
     }
 
     @Test
