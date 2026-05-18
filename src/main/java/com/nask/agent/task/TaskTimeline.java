@@ -2,6 +2,7 @@ package com.nask.agent.task;
 
 import com.nask.agent.approval.ApprovalRequestRecord;
 import com.nask.agent.audit.AuditEvent;
+import com.nask.agent.conversation.ConversationContextWindow;
 import com.nask.agent.file.FileChange;
 import com.nask.agent.plan.PlanView;
 import com.nask.agent.report.TaskReport;
@@ -27,5 +28,6 @@ public record TaskTimeline(
         List<UserInputRequestRecord> userInputs,
         List<RuntimeFailure> failures,
         List<FileChange> changes,
-        TaskReport report) {
+        TaskReport report,
+        ConversationContextWindow conversationContext) {
 }

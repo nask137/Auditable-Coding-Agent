@@ -5,6 +5,7 @@ import com.nask.agent.command.CommandExecutionRepository;
 import com.nask.agent.command.CommandToolService;
 import com.nask.agent.common.AgentSettings;
 import com.nask.agent.common.Domain;
+import com.nask.agent.conversation.ConversationContextService;
 import com.nask.agent.conversation.ConversationService;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.file.FileToolService;
@@ -45,6 +46,7 @@ import java.util.UUID;
 @Component
 public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     private static final int PREVIOUS_CONVERSATION_TASK_LIMIT = 3;
+    private static final int WORKSPACE_INSPECTION_DEPTH = 6;
 
     private final AgentStepService stepService;
     private final AgentActionService actionService;
@@ -64,6 +66,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     private final TaskService taskService;
     private final UserInputRequestService userInputRequestService;
     private final ConversationService conversationService;
+    private final ConversationContextService conversationContextService;
     private final ProjectMemoryService projectMemoryService;
     private final ProjectContextRetriever projectContextRetriever;
     private final MemoryWriteProposalService memoryWriteProposalService;
@@ -81,6 +84,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                                      FailureClassifier failureClassifier, TaskService taskService,
                                      UserInputRequestService userInputRequestService,
                                      ConversationService conversationService,
+                                     ConversationContextService conversationContextService,
                                      ProjectMemoryService projectMemoryService,
                                      ProjectContextRetriever projectContextRetriever,
                                      MemoryWriteProposalService memoryWriteProposalService) {
@@ -102,6 +106,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         this.taskService = taskService;
         this.userInputRequestService = userInputRequestService;
         this.conversationService = conversationService;
+        this.conversationContextService = conversationContextService;
         this.projectMemoryService = projectMemoryService;
         this.projectContextRetriever = projectContextRetriever;
         this.memoryWriteProposalService = memoryWriteProposalService;
@@ -124,7 +129,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         this(stepService, actionService, planService, llmGateway, fileToolService, gitToolService, reportService,
                 commandToolService, validationService, settings, fileChangeRepository, commandExecutionRepository,
                 toolRecordRepository, runtimeFailureService, failureClassifier, taskService, userInputRequestService,
-                null, projectMemoryService, projectContextRetriever, memoryWriteProposalService);
+                null, null, projectMemoryService, projectContextRetriever, memoryWriteProposalService);
     }
 
     @Override
@@ -180,7 +185,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         var action = actionService.create(step.id(), Domain.ActionType.CALL_TOOL,
                 "List workspace files for planning", Domain.RiskLevel.LOW);
         var result = fileToolService.listFiles(new ToolExecutionContext(state.task().id(), state.execution().id(), step.id(),
-                action.id(), state.workspace()), ".", 4);
+                action.id(), state.workspace()), ".", WORKSPACE_INSPECTION_DEPTH);
         return completeToolStep(state, step.id(), result, Map.of(
                 "stepId", step.id().toString(),
                 "observedFiles", list(result.payload().get("files"))));
@@ -197,7 +202,8 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
 
     private NodeExecutionResult projectMemory(AgentState state) {
         var query = string(state.transientValue("taskSummary"), state.task().userRequest()) + " "
-                + String.join(" ", list(state.transientValue("searchHints")));
+                + String.join(" ", list(state.transientValue("searchHints"))) + " "
+                + referencedPreviousTaskContext(state);
         var context = projectContextRetriever.retrieve(new MemoryQuery(state.workspace().id(), query,
                 state.task().id(), state.execution().id(), null, List.of(), List.of(), List.of(), 10));
         return NodeExecutionResult.success(context.summary(), Map.of(
@@ -305,6 +311,9 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         }
         var changedFiles = changedFilesForRun(state);
         if (!requiresValidation(state, changedFiles)) {
+            if (requiresFileChange(state)) {
+                return failNoFileChangesForEditTask(state, changedFiles);
+            }
             if (state.plan() != null) {
                 planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
             }
@@ -320,6 +329,9 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             return NodeExecutionResult.waitingUserInput("Waiting for user input");
         }
         if (!decision.shouldValidate() || decision.executableAndArgs().isEmpty()) {
+            if (requiresFileChange(state)) {
+                return failNoFileChangesForEditTask(state, changedFiles);
+            }
             if (state.plan() != null) {
                 planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
             }
@@ -365,6 +377,11 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 || lower.contains("验证");
     }
 
+    private boolean requiresFileChange(AgentState state) {
+        var taskType = string(state.transientValue("taskType"), state.execution().agentMode());
+        return "CODE_EDIT".equalsIgnoreCase(taskType) || "BUG_FIX".equalsIgnoreCase(taskType);
+    }
+
     private List<String> changedFilesForRun(AgentState state) {
         return state.recentFileChanges().stream()
                 .filter(change -> state.execution().id().equals(change.runId()))
@@ -397,6 +414,15 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             var failure = runtimeFailureService.record(state.task().id(), state.execution().id(), step.id(), null,
                     Domain.RuntimeFailureType.VALIDATION_FAILED, "Validation failed: " + result.summary(),
                     result.summary());
+            if (isValidationOnlyRun(state)) {
+                if (state.plan() != null) {
+                    planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.FAILED);
+                }
+                return NodeExecutionResult.failure("Validation failed: " + result.summary(),
+                        Map.of("stepId", step.id().toString(),
+                                "failureId", failure.id().toString(),
+                                "changedFiles", changedFilesForRun(state)));
+            }
             if (Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN.name().equals(failure.strategy())
                     && state.plan() != null) {
                 var currentItem = state.plan().items().isEmpty() ? null : state.plan().items().getLast();
@@ -421,11 +447,38 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             }
             return NodeExecutionResult.failure("Validation failed: " + result.summary());
         }
+        if (requiresFileChange(state) && changedFilesForRun(state).isEmpty()) {
+            return failNoFileChangesForEditTask(state, changedFilesForRun(state), step.id());
+        }
         if (state.plan() != null) {
             planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
         }
         return NodeExecutionResult.success("Validation passed: " + result.summary(),
                 Map.of("stepId", step.id().toString()));
+    }
+
+    private boolean isValidationOnlyRun(AgentState state) {
+        if (Domain.WorkflowMode.TEST.name().equals(state.workflow().mode())) {
+            return true;
+        }
+        var taskType = string(state.transientValue("taskType"), state.execution().agentMode());
+        return "TEST".equalsIgnoreCase(taskType) && changedFilesForRun(state).isEmpty();
+    }
+
+    private NodeExecutionResult failNoFileChangesForEditTask(AgentState state, List<String> changedFiles) {
+        return failNoFileChangesForEditTask(state, changedFiles, null);
+    }
+
+    private NodeExecutionResult failNoFileChangesForEditTask(AgentState state, List<String> changedFiles, UUID stepId) {
+        if (state.plan() != null) {
+            planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.FAILED);
+        }
+        var payload = new java.util.HashMap<String, Object>();
+        payload.put("changedFiles", changedFiles);
+        if (stepId != null) {
+            payload.put("stepId", stepId.toString());
+        }
+        return NodeExecutionResult.failure("No file changes were made for an edit task", payload);
     }
 
     private NodeExecutionResult report(AgentState state) {
@@ -586,11 +639,46 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     }
 
     private List<com.nask.agent.conversation.ConversationTaskContext> previousConversationTasks(AgentState state) {
+        if (conversationContextService != null) {
+            return conversationContextService.window(state.task().conversationId(), state.task().id()).tasks();
+        }
         if (conversationService == null) {
             return List.of();
         }
         return conversationService.previousTaskContext(state.task().conversationId(), state.task().id(),
                 PREVIOUS_CONVERSATION_TASK_LIMIT);
+    }
+
+    private String referencedPreviousTaskContext(AgentState state) {
+        if (!referencesPreviousContext(state.task().userRequest())) {
+            return "";
+        }
+        return previousConversationTasks(state).stream()
+                .map(task -> compact(task.prompt(), 200) + " " + compact(task.finalReport(), 800)
+                        + " " + String.join(" ", task.affectedFiles()))
+                .collect(java.util.stream.Collectors.joining(" "));
+    }
+
+    private boolean referencesPreviousContext(String request) {
+        if (request == null || request.isBlank()) {
+            return false;
+        }
+        var lower = request.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("above")
+                || lower.contains("previous")
+                || lower.contains("last")
+                || lower.contains("上述")
+                || lower.contains("上面")
+                || lower.contains("之前")
+                || lower.contains("建议");
+    }
+
+    private String compact(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        var normalized = value.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength - 3) + "...";
     }
 
     @SuppressWarnings("unchecked")
@@ -612,4 +700,3 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         return value == null ? defaultValue : Integer.parseInt(value.toString());
     }
 }
-

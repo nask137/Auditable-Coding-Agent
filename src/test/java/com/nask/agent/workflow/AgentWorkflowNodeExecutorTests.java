@@ -8,6 +8,7 @@ import com.nask.agent.common.AgentSettings;
 import com.nask.agent.common.Domain;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.file.FileToolService;
+import com.nask.agent.file.FileChange;
 import com.nask.agent.git.GitToolService;
 import com.nask.agent.llm.AgentDecision;
 import com.nask.agent.llm.LlmGateway;
@@ -114,7 +115,8 @@ class AgentWorkflowNodeExecutorTests {
     void appendsRecoveryPlanWhenValidationFails() {
         var ids = ids();
         var item = planItem(ids.planId(), "Validate");
-        var state = state(ids, new PlanView(plan(ids), List.of(item)), null, Map.of("taskType", "TEST"));
+        var state = stateWithChanges(ids, new PlanView(plan(ids), List.of(item)), null, Map.of("taskType", "CODE_EDIT"),
+                List.of(fileChange(ids, "src/main/java/App.java")));
         var step = step(ids.runId(), null, Domain.StepType.VALIDATE);
         var action = action(step.id());
         when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
@@ -149,6 +151,84 @@ class AgentWorkflowNodeExecutorTests {
     }
 
     @Test
+    void validationOnlyFailureDoesNotAppendRecoveryPlan() {
+        var ids = ids();
+        var state = state(ids, new PlanView(plan(ids), List.of()), null, Map.of("taskType", "TEST"));
+        var step = step(ids.runId(), null, Domain.StepType.VALIDATE);
+        var action = action(step.id());
+        when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
+        when(llmGateway.suggestValidation(any())).thenReturn(new ValidationDecision(true, List.of("mvn", "compile"),
+                "Compile project"));
+        when(stepService.start(ids.taskId(), ids.runId(), null, Domain.StepType.VALIDATE, "Compile project"))
+                .thenReturn(step);
+        when(stepService.getRequired(step.id())).thenReturn(step);
+        when(actionService.create(step.id(), Domain.ActionType.RUN_VALIDATION, "Compile project",
+                Domain.RiskLevel.MEDIUM)).thenReturn(action);
+        var commandId = UUID.randomUUID();
+        when(commandToolService.runCommand(any(), eq("mvn"), eq(List.of("compile")), eq("."), eq("Compile project")))
+                .thenReturn(ToolExecutionResult.success("compile failed", Map.of("exitCode", 1, "commandId", commandId)));
+        var failure = failure(ids, step.id(), null, Domain.RuntimeFailureType.VALIDATION_FAILED,
+                Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN, "Validation failed: compile failed");
+        when(runtimeFailureService.record(eq(ids.taskId()), eq(ids.runId()), eq(step.id()), eq(null),
+                eq(Domain.RuntimeFailureType.VALIDATION_FAILED), any(), any())).thenReturn(failure);
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("FAILURE");
+        assertThat(result.summary()).contains("Validation failed");
+        verify(validationService).record(ids.taskId(), ids.runId(), step.id(), commandId, Domain.ValidationType.TEST,
+                false, "compile failed");
+        verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.FAILED);
+        verify(llmGateway, never()).replan(any(), any());
+        verify(planService, never()).appendRecoveryItems(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void failsEditTaskWhenNoFileChangesWereMade() {
+        var ids = ids();
+        var state = state(ids, new PlanView(plan(ids), List.of()), null, Map.of("taskType", "CODE_EDIT"));
+        when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("FAILURE");
+        assertThat(result.summary()).contains("No file changes");
+        verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.FAILED);
+        verify(llmGateway, never()).suggestValidation(any());
+    }
+
+    @Test
+    void failsEditTaskWhenValidationPassesButNoFileChangesWereMade() {
+        var ids = ids();
+        var state = stateWithRequest(ids, new PlanView(plan(ids), List.of()), null,
+                Map.of("taskType", "CODE_EDIT"), List.of(), "fix this and run tests");
+        var step = step(ids.runId(), null, Domain.StepType.VALIDATE);
+        var action = action(step.id());
+        when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
+        when(llmGateway.suggestValidation(any())).thenReturn(new ValidationDecision(true, List.of("mvn", "test"),
+                "Run tests"));
+        when(stepService.start(ids.taskId(), ids.runId(), null, Domain.StepType.VALIDATE, "Run tests"))
+                .thenReturn(step);
+        when(stepService.getRequired(step.id())).thenReturn(step);
+        when(actionService.create(step.id(), Domain.ActionType.RUN_VALIDATION, "Run tests", Domain.RiskLevel.MEDIUM))
+                .thenReturn(action);
+        var commandId = UUID.randomUUID();
+        when(commandToolService.runCommand(any(), eq("mvn"), eq(List.of("test")), eq("."), eq("Run tests")))
+                .thenReturn(ToolExecutionResult.success("tests passed", Map.of("exitCode", 0, "commandId", commandId)));
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("FAILURE");
+        assertThat(result.summary()).contains("No file changes");
+        verify(validationService).record(ids.taskId(), ids.runId(), step.id(), commandId, Domain.ValidationType.TEST,
+                true, "tests passed");
+        verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.FAILED);
+    }
+
+    @Test
     void skipsValidationWithoutModelCallWhenCodingRunMadeNoFileChanges() {
         var ids = ids();
         var state = state(ids, new PlanView(plan(ids), List.of()), null, Map.of("taskType", "REVIEW"));
@@ -161,6 +241,28 @@ class AgentWorkflowNodeExecutorTests {
         assertThat(result.summary()).contains("Skipped validation");
         verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.COMPLETED);
         verify(llmGateway, never()).suggestValidation(any());
+    }
+
+    @Test
+    void inspectsWorkspaceDeepEnoughForMavenPackagePaths() {
+        var ids = ids();
+        var state = state(ids, null, null, Map.of());
+        var step = step(ids.runId(), null, Domain.StepType.INSPECT_WORKSPACE);
+        var action = action(step.id());
+        when(stepService.start(ids.taskId(), ids.runId(), null, Domain.StepType.INSPECT_WORKSPACE,
+                "Inspect workspace")).thenReturn(step);
+        when(actionService.create(step.id(), Domain.ActionType.CALL_TOOL, "List workspace files for planning",
+                Domain.RiskLevel.LOW)).thenReturn(action);
+        when(fileToolService.listFiles(any(), eq("."), eq(6))).thenReturn(ToolExecutionResult.success(
+                "Listed 1 files", Map.of("files", List.of("src/main/java/cdu/wangnan/App.java"))));
+        when(stepService.getRequired(step.id())).thenReturn(step);
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("inspect_workspace", Domain.WorkflowNodeType.WORKSPACE_INSPECTION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.payload().get("observedFiles").toString()).contains("App.java");
+        verify(fileToolService).listFiles(any(), eq("."), eq(6));
     }
 
     @Test
@@ -192,8 +294,18 @@ class AgentWorkflowNodeExecutorTests {
     }
 
     private AgentState state(Ids ids, PlanView plan, PlanItem currentItem, Map<String, Object> transientData) {
+        return stateWithChanges(ids, plan, currentItem, transientData, List.of());
+    }
+
+    private AgentState stateWithChanges(Ids ids, PlanView plan, PlanItem currentItem,
+                                        Map<String, Object> transientData, List<FileChange> changes) {
+        return stateWithRequest(ids, plan, currentItem, transientData, changes, "request");
+    }
+
+    private AgentState stateWithRequest(Ids ids, PlanView plan, PlanItem currentItem,
+                                        Map<String, Object> transientData, List<FileChange> changes, String request) {
         var now = Instant.now();
-        var task = new CodingTask(ids.taskId(), ids.workspaceId(), null, 1, "task", "request",
+        var task = new CodingTask(ids.taskId(), ids.workspaceId(), null, 1, "task", request,
                 Domain.TaskStatus.RUNNING.name(), "CODE_EDIT", now, null, null,
                 Map.of("workflow", "coding-agent"), now, now);
         var run = task;
@@ -201,8 +313,15 @@ class AgentWorkflowNodeExecutorTests {
                 List.of(), now, now);
         var workflow = new WorkflowDefinition(ids.workflowId(), "coding-agent", 1, "Coding",
                 Domain.WorkflowMode.CODING.name(), true, Map.of(), now, now);
-        return new AgentState(task, run, workspace, workflow, plan, currentItem, List.of(), List.of(), List.of(),
+        return new AgentState(task, run, workspace, workflow, plan, currentItem, changes, List.of(), List.of(),
                 null, List.of(), List.of(), null, transientData);
+    }
+
+    private FileChange fileChange(Ids ids, String path) {
+        var now = Instant.now();
+        return new FileChange(UUID.randomUUID(), ids.workspaceId(), ids.taskId(), ids.runId(), UUID.randomUUID(),
+                UUID.randomUUID(), path, Domain.ChangeType.MODIFY.name(), "reason", "", "before", "after", null,
+                now, Domain.PatchApplyStatus.APPLIED.name(), 1, 0, Domain.RiskLevel.LOW.name(), null, now);
     }
 
     private Plan plan(Ids ids) {

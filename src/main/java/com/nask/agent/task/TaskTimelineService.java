@@ -2,6 +2,7 @@ package com.nask.agent.task;
 
 import com.nask.agent.approval.ApprovalService;
 import com.nask.agent.audit.AuditService;
+import com.nask.agent.conversation.ConversationContextService;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.plan.PlanService;
 import com.nask.agent.report.TaskReportRepository;
@@ -28,12 +29,14 @@ public class TaskTimelineService {
     private final RuntimeFailureService runtimeFailureService;
     private final FileChangeRepository fileChangeRepository;
     private final TaskReportRepository reportRepository;
+    private final ConversationContextService conversationContextService;
 
     public TaskTimelineService(TaskService taskService, PlanService planService,
                                AgentStepService stepService, WorkflowService workflowService, AuditService auditService,
                                ApprovalService approvalService, UserInputRequestService userInputRequestService,
                                RuntimeFailureService runtimeFailureService, FileChangeRepository fileChangeRepository,
-                               TaskReportRepository reportRepository) {
+                               TaskReportRepository reportRepository,
+                               ConversationContextService conversationContextService) {
         this.taskService = taskService;
         this.planService = planService;
         this.stepService = stepService;
@@ -44,6 +47,7 @@ public class TaskTimelineService {
         this.runtimeFailureService = runtimeFailureService;
         this.fileChangeRepository = fileChangeRepository;
         this.reportRepository = reportRepository;
+        this.conversationContextService = conversationContextService;
     }
 
     public TaskTimeline get(UUID taskId) {
@@ -59,6 +63,7 @@ public class TaskTimelineService {
                 userInputRequestService.list(null).stream().filter(request -> taskId.equals(request.runId())).toList(),
                 runtimeFailureService.findByRun(taskId),
                 fileChangeRepository.findByTask(task.id()).stream().filter(change -> taskId.equals(change.runId())).toList(),
-                reportRepository.findLatestByTask(task.id()).filter(report -> taskId.equals(report.runId())).orElse(null));
+                reportRepository.findLatestByTask(task.id()).filter(report -> taskId.equals(report.runId())).orElse(null),
+                conversationContextService.window(task.conversationId(), task.id()));
     }
 }

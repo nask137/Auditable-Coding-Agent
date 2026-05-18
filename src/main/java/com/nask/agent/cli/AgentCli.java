@@ -2,6 +2,7 @@ package com.nask.agent.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nask.agent.common.TaskIntentClassifier;
 import picocli.CommandLine;
 
 import java.net.URI;
@@ -225,7 +226,8 @@ public class AgentCli implements Callable<Integer> {
             var root = (AgentCli) spec.root().userObject();
             var created = root.post("/api/tasks", Map.of("workspaceId", workspaceId, "title", "CLI task", "userRequest", task));
             var id = root.mapper.readTree(created).get("id").asText();
-            System.out.println(root.format(root.post("/api/tasks/" + id + "/start?workflow=" + workflow, null)));
+            var selectedWorkflow = TaskIntentClassifier.defaultWorkflowFor(workflow, task);
+            System.out.println(root.format(root.post("/api/tasks/" + id + "/start?workflow=" + selectedWorkflow, null)));
             return 0;
         }
     }

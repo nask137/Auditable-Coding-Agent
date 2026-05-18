@@ -74,6 +74,38 @@ class StructuredLlmOutputValidatorTests {
     }
 
     @Test
+    void rejectsVirtualTaskReportPathAsToolInput() {
+        var decision = new AgentDecision(UUID.randomUUID(), List.of(
+                new AgentDecision.Action("READ_FILE", "Read historical report",
+                        Map.of("path", "task-reports/task/report.md"))));
+
+        assertThatThrownBy(() -> validator.validate(decision))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("virtual task report path");
+    }
+
+    @Test
+    void rejectsAbsolutePathAsToolInput() {
+        var decision = new AgentDecision(UUID.randomUUID(), List.of(
+                new AgentDecision.Action("READ_FILE", "Read absolute path",
+                        Map.of("path", "D:/workspace/Agent Test/src/main/java/App.java"))));
+
+        assertThatThrownBy(() -> validator.validate(decision))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("workspace-relative");
+    }
+
+    @Test
+    void rejectsVirtualTaskReportPathInPlanRelatedFiles() {
+        var plan = new PlanDraft(List.of(new PlanDraft.Item("Read old report",
+                List.of("task-reports/task/report.md"), "bad source path")));
+
+        assertThatThrownBy(() -> validator.validate(plan))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("virtual task report path");
+    }
+
+    @Test
     void rejectsInvalidTaskType() {
         var understanding = new TaskUnderstanding("summary", "DELETE_REPO", List.of(), List.of());
 

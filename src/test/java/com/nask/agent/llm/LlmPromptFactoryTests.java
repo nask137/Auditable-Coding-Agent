@@ -82,7 +82,7 @@ class LlmPromptFactoryTests {
     }
 
     @Test
-    void taskUnderstandingUsesCompactConversationOrientationWithoutOldReports() {
+    void taskUnderstandingIncludesCompactPreviousReportForExplicitReferences() {
         var oldReport = "OLD_REPORT_DETAIL ".repeat(200);
         var previousTask = new ConversationTaskContext(UUID.randomUUID(),
                 "previously update README and run validation", "COMPLETED", oldReport,
@@ -96,7 +96,8 @@ class LlmPromptFactoryTests {
                 .contains("lightweight orientation")
                 .contains("previously update README")
                 .contains("Affected files: [README.md]")
-                .doesNotContain("Final report")
-                .doesNotContain("OLD_REPORT_DETAIL");
+                .contains("Report excerpt: OLD_REPORT_DETAIL")
+                .contains("If the user")
+                .doesNotContain(oldReport);
     }
 }

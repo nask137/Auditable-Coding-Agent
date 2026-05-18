@@ -27,14 +27,20 @@ class CliOutputFormatter {
 
     String status(JsonNode timeline, String baseUrl, String permissionPreset) {
         var task = timeline.path("task");
+        var context = timeline.path("conversationContext");
         return """
                 Base URL: %s
                 Permission: %s
                 Workspace ID: %s
                 Conversation: %s
+                Conversation context: %s / %s bytes (%s%%), tasks %s/%s, %s
                 Task: %s %s
                 """.formatted(baseUrl, permissionPreset, task.path("workspaceId").asText(""),
                 task.path("conversationId").asText(""),
+                context.path("usedBytes").asText("0"), context.path("maxBytes").asText("0"),
+                contextPercent(context), context.path("tasksIncluded").asText("0"),
+                context.path("tasksAvailable").asText("0"),
+                context.path("compressed").asBoolean(false) ? "compressed" : "uncompressed",
                 task.path("id").asText(""), task.path("status").asText(""));
     }
 
@@ -254,6 +260,14 @@ class CliOutputFormatter {
     private static String oneLine(String value) {
         var line = value == null ? "" : value.replace('\n', ' ').replace('\r', ' ').strip();
         return line.length() > 100 ? line.substring(0, 100) + "..." : line;
+    }
+
+    private static String contextPercent(JsonNode context) {
+        var max = context.path("maxBytes").asDouble(0);
+        if (max <= 0) {
+            return "0.0";
+        }
+        return "%.1f".formatted(context.path("usedBytes").asDouble(0) * 100.0 / max);
     }
 
     private static String shortId(String value) {

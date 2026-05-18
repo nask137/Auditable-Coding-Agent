@@ -28,8 +28,10 @@ public class LlmPromptFactory {
                 User request:
                 %s
 
-                Previous tasks in this conversation. Use these only for lightweight orientation; do not treat
-                earlier task goals or assumptions as current requirements unless the user explicitly refers to them:
+                Previous tasks in this conversation. Use these only for lightweight orientation. If the user
+                explicitly refers to prior output using words like above, previous, last, 上述, 上面, 之前, or 建议,
+                use the prior report to resolve the reference. Otherwise, do not treat earlier task goals or
+                assumptions as current requirements:
                 %s
 
                 Runtime recovery notes:
@@ -50,6 +52,9 @@ public class LlmPromptFactory {
                   ]
                 }
                 Create 2 to 6 small plan items. Do not include actions that bypass Runtime approval.
+                relatedFiles must contain only real workspace-relative source/config/test paths from the observed
+                workspace or code symbols. Do not put task-reports paths in relatedFiles; those are historical
+                memory references, not editable workspace files.
 
                 Task understanding:
                 %s
@@ -129,6 +134,8 @@ public class LlmPromptFactory {
                 Do not use CREATE_FILE to create directories. Use CREATE_DIRECTORY for directory paths.
                 Every CREATE_FILE action must include a non-empty content string.
                 Use READ_FILE before APPLY_PATCH unless recent tool results already include the exact target content.
+                Tool path inputs must be real workspace-relative paths. Never use task-reports paths or absolute
+                filesystem paths from project memory as tool inputs.
 
                 Current plan item:
                 %s
@@ -163,6 +170,8 @@ public class LlmPromptFactory {
                 }
                 Create 1 to 3 small recovery plan items. Do not repeat a rejected action.
                 Prefer reading current file contents before patching when the failure involved paths or patches.
+                relatedFiles must contain only real workspace-relative files. Do not use task-reports paths;
+                those are historical memory references, not editable workspace files.
 
                 Current failed plan item:
                 %s
@@ -268,11 +277,20 @@ public class LlmPromptFactory {
         var profile = context.profile() == null ? "No project profile." : context.profile().languageSummary();
         var results = context.results().stream()
                 .limit(8)
-                .map(result -> "- %s %.1f %s %s".formatted(result.resultType(), result.score(),
-                        result.title(), result.source()))
+                .map(result -> "- %s %.1f %s source=%s snippet=%s".formatted(result.resultType(), result.score(),
+                        result.title(), sourceSummary(result), compact(result.snippet(), 180)))
                 .toList();
         return "Retrieval %s: %s%nProfile: %s%nResults:%n%s".formatted(
                 context.retrievalId(), context.summary(), profile, String.join("\n", results));
+    }
+
+    private String sourceSummary(com.nask.agent.memory.MemorySearchResult result) {
+        var source = result.source();
+        var documentType = result.metadata() == null ? null : result.metadata().get("documentType");
+        if ("TASK_REPORT".equals(documentType)) {
+            return "historical task report " + source.sourceId() + " (not a workspace file path)";
+        }
+        return source.path() == null || source.path().isBlank() ? source.sourceType() : source.path();
     }
 
     private String conversationHistory(TaskContext context) {
@@ -283,8 +301,10 @@ public class LlmPromptFactory {
                 .map(task -> """
                         - Task %s [%s]
                           Prompt: %s
+                          Report excerpt: %s
                           Affected files: %s
-                        """.formatted(task.taskId(), task.status(), compact(task.prompt(), 300), task.affectedFiles()))
+                        """.formatted(task.taskId(), task.status(), compact(task.prompt(), 300),
+                        compact(task.finalReport(), 700), task.affectedFiles()))
                 .collect(java.util.stream.Collectors.joining("\n"));
     }
 

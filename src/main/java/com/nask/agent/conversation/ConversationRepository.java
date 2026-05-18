@@ -20,6 +20,8 @@ import static com.nask.agent.common.DbValues.ts;
  */
 @Repository
 public class ConversationRepository {
+
+    private static final int DEFAULT_REPORT_EXCERPT_BYTES = 1200;
     private final NamedParameterJdbcTemplate jdbc;
     private final JsonSupport json;
 
@@ -80,34 +82,80 @@ public class ConversationRepository {
     }
 
     public List<ConversationTaskContext> previousTaskContext(UUID conversationId, UUID currentTaskId, int limit) {
+        return previousTaskContext(conversationId, currentTaskId, limit,
+                Math.max(1, limit) * DEFAULT_REPORT_EXCERPT_BYTES);
+    }
+
+    public List<ConversationTaskContext> previousTaskContext(UUID conversationId, UUID currentTaskId, int limit,
+                                                             int contextFetchMaxBytes) {
         return jdbc.query("""
-                select t.id,
-                       t.user_request,
-                       t.status,
-                       t.created_at,
-                       r.content_md,
-                       coalesce(
-                         jsonb_agg(distinct fc.path) filter (where fc.path is not null),
-                         '[]'::jsonb
-                       ) as affected_files
-                  from task t
-                  left join lateral (
-                    select substring(content_md from 1 for 1200) as content_md
-                      from task_report tr
-                     where tr.task_id = t.id
-                     order by tr.created_at desc
-                     limit 1
-                  ) r on true
-                  left join file_change fc on fc.task_id = t.id
-                 where t.conversation_id = :conversationId
-                   and t.id <> :currentTaskId
-                 group by t.id, t.user_request, t.status, t.created_at, r.content_md, t.prompt_index
-                 order by t.prompt_index desc, t.created_at desc
-                 limit :limit
+                with previous_tasks as (
+                    select t.id,
+                           t.user_request,
+                           t.status,
+                           t.created_at,
+                           t.prompt_index
+                      from task t
+                     where t.conversation_id = :conversationId
+                       and t.id <> :currentTaskId
+                     order by t.prompt_index desc, t.created_at desc
+                     limit :limit
+                ),
+                task_context as (
+                    select t.id,
+                           t.user_request,
+                           t.status,
+                           t.created_at,
+                           t.prompt_index,
+                           coalesce(r.content_md, '') as raw_report,
+                           coalesce(f.affected_files, '[]'::jsonb) as affected_files,
+                           octet_length(coalesce(t.user_request, ''))
+                             + octet_length(coalesce(t.status, ''))
+                             + octet_length(coalesce(f.affected_files::text, '[]'))
+                             + 64 as base_bytes
+                      from previous_tasks t
+                      left join lateral (
+                        select content_md
+                          from task_report tr
+                         where tr.task_id = t.id
+                         order by tr.created_at desc
+                         limit 1
+                      ) r on true
+                      left join lateral (
+                        select coalesce(jsonb_agg(distinct fc.path) filter (where fc.path is not null),
+                                        '[]'::jsonb) as affected_files
+                          from file_change fc
+                         where fc.task_id = t.id
+                      ) f on true
+                ),
+                budgeted as (
+                    select *,
+                           coalesce(sum(base_bytes + octet_length(raw_report)) over (
+                             order by prompt_index desc, created_at desc
+                             rows between unbounded preceding and 1 preceding
+                           ), 0) as bytes_before
+                      from task_context
+                )
+                select id,
+                       user_request,
+                       status,
+                       created_at,
+                       case
+                         when (:contextFetchMaxBytes - bytes_before - base_bytes) <= 0 then ''
+                         else substring(raw_report from 1 for least(
+                           octet_length(raw_report),
+                           greatest(0, :contextFetchMaxBytes - bytes_before - base_bytes)
+                         )::int)
+                       end as content_md,
+                       affected_files
+                  from budgeted
+                 where bytes_before < :contextFetchMaxBytes
+                 order by prompt_index desc, created_at desc
                 """, new MapSqlParameterSource()
                 .addValue("conversationId", conversationId)
                 .addValue("currentTaskId", currentTaskId)
-                .addValue("limit", limit), contextMapper());
+                .addValue("limit", limit)
+                .addValue("contextFetchMaxBytes", Math.max(1, contextFetchMaxBytes)), contextMapper());
     }
 
     private RowMapper<Conversation> mapper() {

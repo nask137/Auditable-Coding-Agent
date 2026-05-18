@@ -4,6 +4,7 @@ import com.nask.agent.plan.PlanService;
 import com.nask.agent.plan.PlanView;
 import com.nask.agent.step.AgentStep;
 import com.nask.agent.step.AgentStepService;
+import com.nask.agent.common.TaskIntentClassifier;
 import com.nask.agent.workflow.WorkflowService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -75,9 +76,10 @@ public class TaskController {
      */
     @PostMapping("/{taskId}/start")
     CodingTask start(@PathVariable UUID taskId,
-                   @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
+                   @RequestParam(name = "workflow", required = false) String workflow) {
         var task = taskService.getRequired(taskId);
-        var workflowDefinition = workflowService.requireEnabledByName(workflow);
+        var selectedWorkflow = TaskIntentClassifier.defaultWorkflowFor(workflow, task.userRequest());
+        var workflowDefinition = workflowService.requireEnabledByName(selectedWorkflow);
         taskService.startExecution(task, workflowDefinition.name());
         // Phase 1 executes inline so API clients can immediately observe the final
         // state or a WAITING_APPROVAL pause without a background worker.
@@ -90,9 +92,10 @@ public class TaskController {
      */
     @PostMapping("/{taskId}/start-async")
     CodingTask startAsync(@PathVariable UUID taskId,
-                        @RequestParam(name = "workflow", required = false, defaultValue = "coding-agent") String workflow) {
+                        @RequestParam(name = "workflow", required = false) String workflow) {
         var task = taskService.getRequired(taskId);
-        var workflowDefinition = workflowService.requireEnabledByName(workflow);
+        var selectedWorkflow = TaskIntentClassifier.defaultWorkflowFor(workflow, task.userRequest());
+        var workflowDefinition = workflowService.requireEnabledByName(selectedWorkflow);
         taskService.startExecution(task, workflowDefinition.name());
         asyncExecutor.submit(task.id());
         return taskService.getRequired(taskId);
