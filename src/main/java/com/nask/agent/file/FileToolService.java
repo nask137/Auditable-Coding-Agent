@@ -88,11 +88,11 @@ public class FileToolService {
             var root = check.absolutePath();
             var files = new ArrayList<String>();
             var ignoreView = ignoreService.ignoreView(context.workspace());
-            walkReadableFiles(context, root, Math.max(1, maxDepth), files, ignoreView.ignoredPrefixes());
+            walkReadableFiles(context, root, Math.max(1, maxDepth), files, ignoreView);
             files.sort(String::compareTo);
             completeTool(call.id(), true, "Listed " + files.size() + " files", Map.of("files", files,
                     "truncated", files.size() >= 500, "ignoreSource", ignoreView.source(),
-                    "ignoredPrefixes", ignoreView.ignoredPrefixes()), null);
+                    "ignoredFiles", ignoreView.ignoredFiles(), "ignoredPrefixes", ignoreView.ignoredPrefixes()), null);
             return ToolExecutionResult.success("Listed " + files.size() + " files", Map.of("files", files));
         } catch (Exception e) {
             failTool(call.id(), e.getMessage());
@@ -101,11 +101,11 @@ public class FileToolService {
     }
 
     private void walkReadableFiles(ToolExecutionContext context, Path root, int maxDepth, List<String> files,
-                                   List<String> ignoredPrefixes) throws IOException {
+                                   WorkspaceIgnoreService.IgnoreView ignoreView) throws IOException {
         Files.walkFileTree(root, java.util.Set.of(), maxDepth, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                if (!dir.equals(root) && shouldSkipDirectory(context, root, dir, ignoredPrefixes)) {
+                if (!dir.equals(root) && shouldSkipDirectory(context, dir, ignoreView.ignoredPrefixes())) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
                 return FileVisitResult.CONTINUE;
@@ -113,7 +113,7 @@ public class FileToolService {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                if (attrs.isRegularFile()) {
+                if (attrs.isRegularFile() && !isIgnoredFile(context, file, ignoreView)) {
                     addIfReadable(context, file, files);
                 }
                 return files.size() >= 500 ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
@@ -126,15 +126,28 @@ public class FileToolService {
         });
     }
 
-    private boolean shouldSkipDirectory(ToolExecutionContext context, Path root, Path dir, List<String> ignoredPrefixes) {
-        var relative = root.relativize(dir.toAbsolutePath().normalize()).toString().replace('\\', '/');
+    private boolean shouldSkipDirectory(ToolExecutionContext context, Path dir, List<String> ignoredPrefixes) {
+        var relative = workspaceRelative(context, dir);
         var check = pathGuard.check(context.workspace(), relative, false);
         if (!check.allowed()) {
             return true;
         }
         var prefix = relative.endsWith("/") ? relative : relative + "/";
         for (var ignoredPrefix : ignoredPrefixes) {
-            if (ignoredPrefix.equals(prefix) || ignoredPrefix.startsWith(prefix)) {
+            if (prefix.equals(ignoredPrefix) || prefix.startsWith(ignoredPrefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isIgnoredFile(ToolExecutionContext context, Path file, WorkspaceIgnoreService.IgnoreView ignoreView) {
+        var relative = workspaceRelative(context, file);
+        if (ignoreView.ignoredFiles().contains(relative)) {
+            return true;
+        }
+        for (var ignoredPrefix : ignoreView.ignoredPrefixes()) {
+            if (relative.startsWith(ignoredPrefix)) {
                 return true;
             }
         }
@@ -181,8 +194,10 @@ public class FileToolService {
         try {
             var root = Path.of(context.workspace().rootPath()).toAbsolutePath().normalize();
             var matches = new ArrayList<String>();
+            var ignoreView = ignoreService.ignoreView(context.workspace());
             try (var walk = Files.walk(root, 8)) {
                 walk.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
+                        .filter(p -> !isIgnoredFile(context, p, ignoreView))
                         .limit(1000)
                         .forEach(p -> searchFile(context, root, p, query, matches));
             }
@@ -401,12 +416,16 @@ public class FileToolService {
         return name != null && HIGH_IMPACT_FILES.contains(name.toString());
     }
 
+    private String workspaceRelative(ToolExecutionContext context, Path path) {
+        var workspaceRoot = Path.of(context.workspace().rootPath()).toAbsolutePath().normalize();
+        return workspaceRoot.relativize(path.toAbsolutePath().normalize()).toString().replace('\\', '/');
+    }
+
     /**
      * Adds a file to a listing only if it remains readable after guard checks.
      */
     private void addIfReadable(ToolExecutionContext context, Path file, List<String> files) {
-        var root = Path.of(context.workspace().rootPath()).toAbsolutePath().normalize();
-        var relative = root.relativize(file.toAbsolutePath().normalize()).toString().replace('\\', '/');
+        var relative = workspaceRelative(context, file);
         var check = pathGuard.check(context.workspace(), relative, false);
         var decision = permissionService.fileDecision(check, Domain.FileOperation.FILE_READ, false, 0);
         if (decision.decision() == Domain.PermissionDecisionType.ALLOW) {

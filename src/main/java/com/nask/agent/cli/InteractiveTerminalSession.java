@@ -15,15 +15,16 @@ import java.util.UUID;
 class InteractiveTerminalSession {
     private static final java.util.Set<String> TERMINAL = java.util.Set.of("COMPLETED", "FAILED", "CANCELLED");
     private static final String CUSTOM_USER_INPUT_OPTION = "None of these; answer manually";
+    private static final String DEFAULT_CONVERSATION_TITLE = "Conversation";
 
     private final AgentCli cli;
     private final ObjectMapper mapper;
     private final CliLocalConfig config;
-    private final CliSessionStore sessions;
     private final CliOutputFormatter formatter;
     private final Scanner scanner = new Scanner(System.in, inputCharset());
     private String workspaceId = "";
     private String conversationId = "";
+    private String conversationTitle = "";
     private String taskId = "";
     private int renderedEvents;
 
@@ -34,12 +35,11 @@ class InteractiveTerminalSession {
         if (cli.baseUrl != null && !cli.baseUrl.isBlank()) {
             config.set("base_url", cli.baseUrl);
         }
-        this.sessions = new CliSessionStore(mapper, config.sessionsDir());
         this.formatter = new CliOutputFormatter(mapper, rawJson);
     }
 
     void run(String initialPrompt) throws Exception {
-        System.out.println("Auditable Agent TUI. Type /status, /workspace, /plan, /diff, /permissions, /resume, /new, /exit.");
+        System.out.println("Auditable Agent TUI. Type /status, /workspace, /plan, /diff, /permissions, /resume, /new, /rename, /exit.");
         try {
             initializeWorkspace();
         } catch (IllegalStateException e) {
@@ -48,7 +48,6 @@ class InteractiveTerminalSession {
             System.out.println("Cannot connect to " + cli.effectiveBaseUrl()
                     + ". Start the backend service or update --base-url.");
         }
-        sessions.append("session_started", workspaceId, conversationId, taskId, taskId, "", "session started");
         if (initialPrompt != null && !initialPrompt.isBlank()) {
             try {
                 submitPrompt(initialPrompt);
@@ -95,11 +94,7 @@ class InteractiveTerminalSession {
                 yield false;
             }
             case "new" -> {
-                taskId = "";
-                conversationId = "";
-                renderedEvents = 0;
-                sessions.append("new", workspaceId, conversationId, taskId, taskId, "", "new conversation");
-                System.out.println("Started a new conversation in this terminal session.");
+                startNewConversation();
                 yield false;
             }
             case "status" -> {
@@ -135,6 +130,10 @@ class InteractiveTerminalSession {
                 resume(command.argument());
                 yield false;
             }
+            case "rename" -> {
+                renameConversation(command.argument());
+                yield false;
+            }
             default -> {
                 System.out.println("Unknown slash command: /" + command.name());
                 yield false;
@@ -148,16 +147,21 @@ class InteractiveTerminalSession {
         var request = new java.util.LinkedHashMap<String, Object>();
         request.put("workspaceId", workspaceId);
         if (conversationId != null && !conversationId.isBlank()) {
+            if (shouldAutoTitleConversation()) {
+                renameConversationTo(promptTitle(prompt));
+            }
             request.put("conversationId", conversationId);
         }
-        request.put("title", "CLI interactive task");
+        request.put("title", promptTitle(prompt));
         request.put("userRequest", prompt);
         var created = mapper.readTree(cli.post("/api/tasks", request));
         conversationId = created.path("conversationId").asText(conversationId);
+        if (conversationTitle == null || conversationTitle.isBlank()) {
+            conversationTitle = promptTitle(prompt);
+        }
         taskId = created.path("id").asText();
         var started = mapper.readTree(cli.post("/api/tasks/" + taskId + "/start-async?workflow=" + workflow, null));
         renderedEvents = 0;
-        sessions.append("prompt", workspaceId, conversationId, taskId, taskId, started.path("status").asText(), prompt);
         config.save();
         pollUntilBlockedOrDone();
     }
@@ -167,6 +171,19 @@ class InteractiveTerminalSession {
             workspaceId = resolveOrRegisterCurrentWorkspace();
         }
         return workspaceId;
+    }
+
+    String startNewConversation() throws Exception {
+        var workspace = ensureWorkspace();
+        var created = mapper.readTree(cli.post("/api/conversations",
+                Map.of("workspaceId", workspace, "title", DEFAULT_CONVERSATION_TITLE)));
+        conversationId = created.path("id").asText("");
+        conversationTitle = created.path("title").asText(DEFAULT_CONVERSATION_TITLE);
+        taskId = "";
+        renderedEvents = 0;
+        System.out.println("Started new conversation \"" + conversationTitle + "\" (" + shortId(conversationId)
+                + ") in workspace " + workspaceId + ".");
+        return conversationId;
     }
 
     private void pollUntilBlockedOrDone() throws Exception {
@@ -180,7 +197,6 @@ class InteractiveTerminalSession {
             System.out.print(formatter.timelineUpdate(timeline, renderedEvents));
             renderedEvents = events.isArray() ? events.size() : renderedEvents;
             var status = timeline.path("task").path("status").asText("");
-            sessions.append("timeline", workspaceId, conversationId, taskId, taskId, status, status);
             if ("WAITING_APPROVAL".equals(status)) {
                 resolveApproval(timeline);
                 return;
@@ -368,19 +384,19 @@ class InteractiveTerminalSession {
         var timeline = currentTimeline();
         if (timeline == null) {
             System.out.println("""
-                    Session: %s
                     Base URL: %s
                     Permission: %s
                     Workspace ID: %s
                     Conversation: %s
+                    Conversation title: %s
                     Workspace root: %s
                     Task: none
-                    """.formatted(sessions.sessionId(), cli.effectiveBaseUrl(), config.get("permission_preset"),
-                    unresolvedWorkspaceId(), valueOrUnset(conversationId), currentWorkspaceRoot()));
+                    """.formatted(cli.effectiveBaseUrl(), config.get("permission_preset"),
+                    unresolvedWorkspaceId(), valueOrUnset(conversationId), valueOrUnset(conversationTitle),
+                    currentWorkspaceRoot()));
             return;
         }
-        System.out.println(formatter.status(timeline, sessions.sessionId(), cli.effectiveBaseUrl(),
-                config.get("permission_preset")));
+        System.out.println(formatter.status(timeline, cli.effectiveBaseUrl(), config.get("permission_preset")));
     }
 
     private void updatePermissions(String argument) throws Exception {
@@ -414,20 +430,68 @@ class InteractiveTerminalSession {
     }
 
     private void resume(String argument) throws Exception {
-        var id = argument == null || argument.isBlank() || "last".equals(argument)
-                ? sessions.latestSessionId() : argument;
-        if (id == null || id.isBlank()) {
-            System.out.println("No previous session found.");
+        ensureWorkspace();
+        JsonNode conversation;
+        if (argument == null || argument.isBlank()) {
+            conversation = chooseConversation();
+        } else if ("last".equalsIgnoreCase(argument)) {
+            conversation = latestConversation();
+        } else {
+            conversation = mapper.readTree(cli.get("/api/conversations/" + argument));
+        }
+        if (conversation == null || conversation.path("id").asText("").isBlank()) {
+            System.out.println("No backend conversation found for this workspace.");
             return;
         }
-        var state = sessions.lastState(id);
-        sessions.use(id);
-        taskId = state.getOrDefault("taskId", "");
-        conversationId = state.getOrDefault("conversationId", "");
-        workspaceId = state.getOrDefault("workspaceId", workspaceId);
+        conversationId = conversation.path("id").asText("");
+        conversationTitle = conversation.path("title").asText("");
+        workspaceId = conversation.path("workspaceId").asText(workspaceId);
+        taskId = "";
         renderedEvents = 0;
-        System.out.println("Resumed session " + id);
-        printStatus();
+        System.out.println("Resumed conversation \"" + conversationTitle + "\" (" + shortId(conversationId) + ").");
+        System.out.println("Submit a prompt to add a new task to this conversation.");
+    }
+
+    private JsonNode chooseConversation() throws Exception {
+        var conversations = conversationsForWorkspace();
+        if (!conversations.isArray() || conversations.isEmpty()) {
+            return null;
+        }
+        var choices = new java.util.ArrayList<String>();
+        for (var conversation : conversations) {
+            choices.add("%s (%s) updated %s".formatted(conversation.path("title").asText("(untitled)"),
+                    shortId(conversation.path("id").asText("")), conversation.path("updatedAt").asText("-")));
+        }
+        var selected = selectChoice(choices);
+        return conversations.get(selected);
+    }
+
+    private JsonNode latestConversation() throws Exception {
+        var conversations = conversationsForWorkspace();
+        return conversations.isArray() && !conversations.isEmpty() ? conversations.get(0) : null;
+    }
+
+    private JsonNode conversationsForWorkspace() throws Exception {
+        return mapper.readTree(cli.get("/api/conversations?workspaceId=" + ensureWorkspace()));
+    }
+
+    private void renameConversation(String title) throws Exception {
+        if (conversationId == null || conversationId.isBlank()) {
+            System.out.println("No active conversation. Use /new or /resume first.");
+            return;
+        }
+        if (title == null || title.isBlank()) {
+            System.out.println("Usage: /rename <conversation title>");
+            return;
+        }
+        renameConversationTo(title);
+        System.out.println("Renamed conversation to \"" + conversationTitle + "\".");
+    }
+
+    private void renameConversationTo(String title) throws Exception {
+        var renamed = mapper.readTree(cli.post("/api/conversations/" + conversationId + "/rename",
+                Map.of("title", truncate(title.strip(), 120))));
+        conversationTitle = renamed.path("title").asText(conversationTitle);
     }
 
     private void withTimeline(TimelineConsumer consumer) throws Exception {
@@ -532,6 +596,21 @@ class InteractiveTerminalSession {
                 || text.contains("检查问题");
     }
 
+    static String promptTitle(String prompt) {
+        var text = prompt == null ? "" : prompt.replaceAll("\\s+", " ").strip();
+        if (text.isBlank()) {
+            return "CLI task";
+        }
+        return truncate(text, 80);
+    }
+
+    private boolean shouldAutoTitleConversation() {
+        return conversationTitle == null
+                || conversationTitle.isBlank()
+                || DEFAULT_CONVERSATION_TITLE.equals(conversationTitle)
+                || "CLI conversation".equals(conversationTitle);
+    }
+
     static Charset inputCharset() {
         var console = System.console();
         if (console != null) {
@@ -566,6 +645,14 @@ class InteractiveTerminalSession {
 
     private static String valueOrUnset(String value) {
         return value == null || value.isBlank() ? "<unset>" : value;
+    }
+
+    private static String shortId(String value) {
+        return value == null || value.length() < 8 ? valueOrUnset(value) : value.substring(0, 8);
+    }
+
+    private static String truncate(String value, int maxLength) {
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
     private String unresolvedWorkspaceId() {

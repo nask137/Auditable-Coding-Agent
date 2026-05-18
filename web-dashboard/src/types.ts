@@ -186,9 +186,11 @@ export type CliRuntimeSettings = {
 };
 
 export type CliSessionSummary = {
-  sessionId: string;
+  conversationId: string;
+  conversationTitle: string;
   workspaceId?: string;
-  taskId?: string;
-  status?: string;
+  taskCount: number;
+  latestTaskId?: string;
+  latestTaskStatus?: string;
   updatedAt?: string;
 };

@@ -44,6 +44,8 @@ import java.util.UUID;
  */
 @Component
 public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
+    private static final int PREVIOUS_CONVERSATION_TASK_LIMIT = 3;
+
     private final AgentStepService stepService;
     private final AgentActionService actionService;
     private final PlanService planService;
@@ -587,7 +589,8 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         if (conversationService == null) {
             return List.of();
         }
-        return conversationService.previousTaskContext(state.task().conversationId(), state.task().id(), 5);
+        return conversationService.previousTaskContext(state.task().conversationId(), state.task().id(),
+                PREVIOUS_CONVERSATION_TASK_LIMIT);
     }
 
     @SuppressWarnings("unchecked")

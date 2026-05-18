@@ -81,19 +81,56 @@ class InteractiveTerminalSessionTests {
                 .isFalse();
     }
 
+    @Test
+    void newConversationCreatesBackendConversationForCurrentWorkspace() throws Exception {
+        var workspaceId = UUID.randomUUID().toString();
+        var conversationId = UUID.randomUUID().toString();
+        var cli = new FakeAgentCli(mapper.createArrayNode()
+                .add(mapper.createObjectNode()
+                        .put("id", workspaceId)
+                        .put("rootPath", Path.of("").toAbsolutePath().normalize().toString()))
+                .toString(), workspaceId, conversationId);
+        var session = new InteractiveTerminalSession(cli, false);
+
+        assertThat(session.startNewConversation()).isEqualTo(conversationId);
+
+        assertThat(cli.postCalls).isEqualTo(1);
+        assertThat(cli.postPath).isEqualTo("/api/conversations");
+        assertThat(cli.postBody).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        var request = (Map<String, Object>) cli.postBody;
+        assertThat(request)
+                .containsEntry("workspaceId", workspaceId)
+                .containsEntry("title", "Conversation");
+    }
+
+    @Test
+    void promptTitleUsesPromptPrefixUpToEightyCharacters() {
+        assertThat(InteractiveTerminalSession.promptTitle("  fix   the failing workspace ignore handling  "))
+                .isEqualTo("fix the failing workspace ignore handling");
+        assertThat(InteractiveTerminalSession.promptTitle("x".repeat(100))).hasSize(80);
+    }
+
     private static class FakeAgentCli extends AgentCli {
         private final String workspaces;
         private final String createdId;
+        private final String createdConversationId;
+        private String postPath;
         private Object postBody;
         private int postCalls;
 
         FakeAgentCli(String workspaces) {
-            this(workspaces, UUID.randomUUID().toString());
+            this(workspaces, UUID.randomUUID().toString(), UUID.randomUUID().toString());
         }
 
         FakeAgentCli(String workspaces, String createdId) {
+            this(workspaces, createdId, UUID.randomUUID().toString());
+        }
+
+        FakeAgentCli(String workspaces, String createdId, String createdConversationId) {
             this.workspaces = workspaces;
             this.createdId = createdId;
+            this.createdConversationId = createdConversationId;
         }
 
         @Override
@@ -104,10 +141,14 @@ class InteractiveTerminalSessionTests {
 
         @Override
         String post(String path, Object body) {
-            assertThat(path).isEqualTo("/api/workspaces");
             postCalls++;
+            postPath = path;
             postBody = body;
-            return "{\"id\":\"" + createdId + "\"}";
+            if ("/api/workspaces".equals(path)) {
+                return "{\"id\":\"" + createdId + "\"}";
+            }
+            assertThat(path).isEqualTo("/api/conversations");
+            return "{\"id\":\"" + createdConversationId + "\"}";
         }
     }
 }

@@ -17,10 +17,10 @@ export function CliSessions() {
       <Card>
         <CardHeader>
           <CardTitle>CLI 会话</CardTitle>
-          <Badge tone="success">本机 transcript</Badge>
+          <Badge tone="success">后端 conversation</Badge>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          展示后端进程用户目录下 .auditable-agent/sessions 的最近 CLI TUI 会话摘要。
+          展示后端 conversation 记录。TUI 的 /resume 会恢复这里的会话，并在同一会话下继续创建多个任务。
         </CardContent>
       </Card>
       <Card>
@@ -28,15 +28,19 @@ export function CliSessions() {
           {error ? <div className="text-sm text-destructive">{error}</div> : (
             <Table>
               <thead>
-                <tr>{["Session", "Status", "Workspace", "Task", "Updated"].map((heading) => <Th key={heading}>{heading}</Th>)}</tr>
+                <tr>{["Conversation", "Latest status", "Workspace", "Tasks", "Latest task", "Updated"].map((heading) => <Th key={heading}>{heading}</Th>)}</tr>
               </thead>
               <tbody>
                 {sessions.map((session) => (
-                  <tr key={session.sessionId}>
-                    <Td>{session.sessionId}</Td>
-                    <Td>{session.status || "-"}</Td>
+                  <tr key={session.conversationId}>
+                    <Td>
+                      <div className="font-medium">{session.conversationTitle || "Conversation"}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{session.conversationId}</div>
+                    </Td>
+                    <Td>{session.latestTaskStatus || "-"}</Td>
                     <Td>{session.workspaceId || "-"}</Td>
-                    <Td>{session.taskId ? <Link className="text-primary underline" to={`/tasks/${session.taskId}`}>{session.taskId}</Link> : "-"}</Td>
+                    <Td>{session.taskCount}</Td>
+                    <Td>{session.latestTaskId ? <Link className="text-primary underline" to={`/tasks/${session.latestTaskId}`}>{session.latestTaskId}</Link> : "-"}</Td>
                     <Td>{session.updatedAt || "-"}</Td>
                   </tr>
                 ))}

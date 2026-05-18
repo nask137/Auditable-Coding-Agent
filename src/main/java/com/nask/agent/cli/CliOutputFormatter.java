@@ -25,16 +25,15 @@ class CliOutputFormatter {
         return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(mapper.readTree(body));
     }
 
-    String status(JsonNode timeline, String sessionId, String baseUrl, String permissionPreset) {
+    String status(JsonNode timeline, String baseUrl, String permissionPreset) {
         var task = timeline.path("task");
         return """
-                Session: %s
                 Base URL: %s
                 Permission: %s
                 Workspace ID: %s
                 Conversation: %s
                 Task: %s %s
-                """.formatted(sessionId, baseUrl, permissionPreset, task.path("workspaceId").asText(""),
+                """.formatted(baseUrl, permissionPreset, task.path("workspaceId").asText(""),
                 task.path("conversationId").asText(""),
                 task.path("id").asText(""), task.path("status").asText(""));
     }

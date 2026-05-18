@@ -59,10 +59,24 @@ public class ConversationService {
         repository.touch(conversationId);
     }
 
+    public Conversation rename(UUID conversationId, String title) {
+        var conversation = getRequired(conversationId);
+        var normalized = title == null ? "" : title.strip();
+        if (normalized.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CONVERSATION_TITLE_REQUIRED",
+                    "Conversation title is required");
+        }
+        return repository.updateTitle(conversation.id(), truncate(normalized, 120));
+    }
+
     public List<ConversationTaskContext> previousTaskContext(UUID conversationId, UUID currentTaskId, int limit) {
         if (conversationId == null) {
             return List.of();
         }
         return repository.previousTaskContext(conversationId, currentTaskId, limit);
+    }
+
+    private String truncate(String value, int maxLength) {
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 }

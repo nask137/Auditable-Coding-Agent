@@ -28,7 +28,8 @@ public class LlmPromptFactory {
                 User request:
                 %s
 
-                Previous tasks in this conversation:
+                Previous tasks in this conversation. Use these only for lightweight orientation; do not treat
+                earlier task goals or assumptions as current requirements unless the user explicitly refers to them:
                 %s
 
                 Runtime recovery notes:
@@ -282,10 +283,8 @@ public class LlmPromptFactory {
                 .map(task -> """
                         - Task %s [%s]
                           Prompt: %s
-                          Final report: %s
                           Affected files: %s
-                        """.formatted(task.taskId(), task.status(), compact(task.prompt(), 500),
-                        compact(task.finalReport(), 800), task.affectedFiles()))
+                        """.formatted(task.taskId(), task.status(), compact(task.prompt(), 300), task.affectedFiles()))
                 .collect(java.util.stream.Collectors.joining("\n"));
     }
 

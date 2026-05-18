@@ -59,23 +59,47 @@ public class WorkspaceIgnoreService {
         if (!repoRoot.startsWith(root)) {
             return new IgnoreView(List.of(), "git_root_outside_workspace", gitRoot.exitCode());
         }
-        var ignored = execute(repoRoot, List.of("ls-files", "--others", "--ignored", "--exclude-standard", "-z"));
+        var ignored = execute(repoRoot, List.of("ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"));
         if (ignored.exitCode() != 0) {
-            return new IgnoreView(List.of(), "git_ls_files_failed", ignored.exitCode());
+            return new IgnoreView(List.of(), List.of(), "git_ls_files_failed", ignored.exitCode());
         }
-        return new IgnoreView(collapseToPrefixes(parseNullSeparated(ignored.output())), "git_ls_files", 0);
+        return collapseIgnoredPaths(repoRoot, parseNullSeparated(ignored.output()));
     }
 
-    private List<String> collapseToPrefixes(List<String> paths) {
-        var prefixes = new LinkedHashSet<String>();
+    private IgnoreView collapseIgnoredPaths(Path repoRoot, List<String> paths) {
+        var files = new LinkedHashSet<String>();
+        var directoryPrefixes = new LinkedHashSet<String>();
         paths.stream()
                 .map(this::normalize)
                 .filter(path -> !path.isBlank())
                 .sorted()
-                .forEach(path -> prefixes.add(path.endsWith("/") ? path : path + "/"));
-        return prefixes.stream()
+                .forEach(path -> {
+                    if (path.endsWith("/") || Files.isDirectory(repoRoot.resolve(path), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        directoryPrefixes.add(path.endsWith("/") ? path : path + "/");
+                    } else {
+                        files.add(path);
+                    }
+                });
+        return new IgnoreView(collapseFiles(files, directoryPrefixes), collapsePrefixes(directoryPrefixes), "git_ls_files", 0);
+    }
+
+    private List<String> collapseFiles(LinkedHashSet<String> files, LinkedHashSet<String> directoryPrefixes) {
+        return files.stream()
+                .filter(path -> directoryPrefixes.stream().noneMatch(path::startsWith))
                 .sorted(Comparator.comparingInt(String::length).thenComparing(String::compareTo))
                 .toList();
+    }
+
+    private List<String> collapsePrefixes(LinkedHashSet<String> prefixes) {
+        var collapsed = new ArrayList<String>();
+        prefixes.stream()
+                .sorted(Comparator.comparingInt(String::length).thenComparing(String::compareTo))
+                .forEach(prefix -> {
+                    if (collapsed.stream().noneMatch(prefix::startsWith)) {
+                        collapsed.add(prefix);
+                    }
+                });
+        return List.copyOf(collapsed);
     }
 
     private String normalize(String path) {
@@ -129,8 +153,13 @@ public class WorkspaceIgnoreService {
         return output.lines().findFirst().orElse("").trim();
     }
 
-    public record IgnoreView(List<String> ignoredPrefixes, String source, int exitCode) {
+    public record IgnoreView(List<String> ignoredFiles, List<String> ignoredPrefixes, String source, int exitCode) {
+        public IgnoreView(List<String> ignoredPrefixes, String source, int exitCode) {
+            this(List.of(), ignoredPrefixes, source, exitCode);
+        }
+
         public IgnoreView {
+            ignoredFiles = ignoredFiles == null ? List.of() : List.copyOf(ignoredFiles);
             ignoredPrefixes = ignoredPrefixes == null ? List.of() : List.copyOf(ignoredPrefixes);
         }
     }
