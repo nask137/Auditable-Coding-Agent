@@ -170,7 +170,7 @@ public class GitToolService {
             return ToolExecutionResult.blocked("Git commit message is required");
         }
         return runGitWrite(context, "git_commit", "Git commit", workingDirectory,
-                () -> List.of("commit", "-m", message), Domain.RiskLevel.HIGH);
+                () -> List.of("commit", "--no-verify", "-m", message), Domain.RiskLevel.HIGH);
     }
 
     /**
@@ -210,8 +210,12 @@ public class GitToolService {
      * Shows one revision.
      */
     public ToolExecutionResult show(ToolExecutionContext context, String workingDirectory, String revision) {
+        var ref = revision == null || revision.isBlank() ? "HEAD" : revision;
+        if (ref.startsWith("-")) {
+            return ToolExecutionResult.blocked("Git show revision must not be an option: " + ref);
+        }
         return runGit(context, "git_show", "Git show", workingDirectory,
-                List.of("show", "--no-ext-diff", "--no-textconv", revision == null || revision.isBlank() ? "HEAD" : revision));
+                List.of("show", "--no-ext-diff", "--no-textconv", ref));
     }
 
     /**

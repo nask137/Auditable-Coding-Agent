@@ -120,6 +120,38 @@ class GitToolServiceTests {
         assertThat(result.payload().get("includedFiles")).isEqualTo(List.of("src/main/java/cdu/wangnan/App.java"));
     }
 
+    @Test
+    void gitShowRejectsOptionShapedRevision() throws Exception {
+        assumeTrue(run(null, "git", "--version") == 0);
+        workspaceDir = TestFiles.createTempDirectory("agent-git-tool-");
+        assertThat(run(workspaceDir, "git", "init")).isZero();
+
+        var result = service().show(context(workspaceDir, List.of()), ".", "--output=AGENT_TASK_NOTE.md");
+
+        assertThat(result.blocked()).isTrue();
+        assertThat(result.summary()).contains("must not be an option");
+        assertThat(workspaceDir.resolve("AGENT_TASK_NOTE.md")).doesNotExist();
+    }
+
+    @Test
+    void gitCommitBypassesRepositoryHooks() throws Exception {
+        assumeTrue(run(null, "git", "--version") == 0);
+        workspaceDir = TestFiles.createTempDirectory("agent-git-tool-");
+        assertThat(run(workspaceDir, "git", "init")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "user.email", "test@example.com")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "user.name", "Test User")).isZero();
+        Files.writeString(workspaceDir.resolve("App.java"), "class App {}\n");
+        assertThat(run(workspaceDir, "git", "add", ".")).isZero();
+        var hook = workspaceDir.resolve(".git/hooks/pre-commit");
+        Files.writeString(hook, "#!/bin/sh\nexit 1\n");
+
+        var result = service().commit(context(workspaceDir, List.of()), ".", "init");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.payload().get("command")).isEqualTo("git commit --no-verify -m init");
+        assertThat(run(workspaceDir, "git", "log", "--oneline", "--max-count=1")).isZero();
+    }
+
     private GitToolService service() {
         var toolRecords = mock(ToolRecordRepository.class);
         when(toolRecords.insertCall(any(), anyString(), any(), anyString(), any()))
