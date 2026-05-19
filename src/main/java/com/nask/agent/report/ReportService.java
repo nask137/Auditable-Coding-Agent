@@ -4,13 +4,11 @@ import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.ApiException;
 import com.nask.agent.conversation.ConversationService;
 import com.nask.agent.file.FileChangeRepository;
-import com.nask.agent.llm.FinalReportDraft;
-import com.nask.agent.llm.LlmGateway;
-import com.nask.agent.llm.ReportContext;
+import com.nask.agent.git.GitToolService;
 import com.nask.agent.memory.ProjectMemoryRepository;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.task.CodingTask;
-import com.nask.agent.tool.ToolRecordRepository;
+import com.nask.agent.workspace.WorkspaceService;
 import com.nask.agent.workflow.WorkflowService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -25,32 +23,33 @@ import java.util.UUID;
 @Service
 public class ReportService {
     private final TaskReportRepository repository;
-    private final LlmGateway llmGateway;
     private final FileChangeRepository fileChangeRepository;
     private final AuditService auditService;
     private final RuntimeFailureService runtimeFailureService;
     private final WorkflowService workflowService;
     private final ProjectMemoryRepository projectMemoryRepository;
     private final ConversationService conversationService;
-    private final ToolRecordRepository toolRecordRepository;
+    private final WorkspaceService workspaceService;
+    private final GitToolService gitToolService;
 
     /**
      * Creates a report service.
      */
-    public ReportService(TaskReportRepository repository, LlmGateway llmGateway,
+    public ReportService(TaskReportRepository repository,
                          FileChangeRepository fileChangeRepository, AuditService auditService,
                          RuntimeFailureService runtimeFailureService, WorkflowService workflowService,
                          ProjectMemoryRepository projectMemoryRepository, ConversationService conversationService,
-                         ToolRecordRepository toolRecordRepository) {
+                         WorkspaceService workspaceService,
+                         GitToolService gitToolService) {
         this.repository = repository;
-        this.llmGateway = llmGateway;
         this.fileChangeRepository = fileChangeRepository;
         this.auditService = auditService;
         this.runtimeFailureService = runtimeFailureService;
         this.workflowService = workflowService;
         this.projectMemoryRepository = projectMemoryRepository;
         this.conversationService = conversationService;
-        this.toolRecordRepository = toolRecordRepository;
+        this.workspaceService = workspaceService;
+        this.gitToolService = gitToolService;
     }
 
     /**
@@ -66,22 +65,19 @@ public class ReportService {
         var retrievals = projectMemoryRepository.findMemoryRetrievalsByRun(runId);
         var proposals = projectMemoryRepository.findMemoryWriteProposalsByRun(runId);
         var previousTasks = conversationService.previousTaskContext(task.conversationId(), task.id(), 5);
-        var recentToolObservations = toolRecordRepository.findRecentSummariesByRun(runId, 8);
-        var projectContextForModel = projectContextForModel(profile, retrievals);
         var workflowSummaries = workflowNodes.stream()
                 .filter(node -> node.outputSummary() != null && !node.outputSummary().isBlank())
                 .map(node -> "%s %s - %s".formatted(node.nodeId(), node.status(), compact(node.outputSummary(), 180)))
                 .toList();
         var changedFiles = changes.stream().map(change -> change.path()).distinct().toList();
+        var gitStatus = gitToolService.inspectWorkspaceStatus(workspaceService.getRequired(task.workspaceId()), ".");
+        var gitChangedFiles = gitStatus.changedFiles();
+        var combinedChangedFiles = java.util.stream.Stream.concat(changedFiles.stream(), gitChangedFiles.stream())
+                .distinct()
+                .toList();
         var previousPrompts = previousTasks.stream().map(previous -> compact(previous.prompt(), 300)).toList();
-        FinalReportDraft draft = llmGateway.generateReport(new ReportContext(task.id(), runId,
-                task.userRequest(), resultSummary, workflowSummaries, changedFiles, previousPrompts,
-                recentToolObservations, projectContextForModel));
-        // The LLM drafts the narrative, while deterministic sections append the
-        // exact file-change and audit trails stored by the runtime.
-        var content = deterministicSummary(task, resultSummary, workflowSummaries, changedFiles, previousPrompts)
-                + "\n## Model Summary\n\n"
-                + draft.markdown()
+        var content = deterministicSummary(task, resultSummary, workflowSummaries, changedFiles, gitStatus,
+                combinedChangedFiles, previousPrompts)
                 + "\n## Project Context\n\n"
                 + (profile == null ? "- Project profile: not available\n"
                 : "- Project profile: %s; frameworks %s; build tools %s; test tools %s\n"
@@ -97,6 +93,8 @@ public class ReportService {
                 + "\n## File Changes\n\n"
                 + changes.stream().map(change -> "- `%s` %s".formatted(change.path(), change.changeType()))
                 .reduce("", (a, b) -> a + b + "\n")
+                + "\n## Git Working Tree\n\n"
+                + gitStatusSection(gitStatus)
                 + "\n## Failure and Recovery\n\n"
                 + failures.stream().map(failure -> "- `%s` strategy `%s`: %s"
                         .formatted(failure.failureType(), failure.strategy(), failure.summary()))
@@ -115,7 +113,10 @@ public class ReportService {
     }
 
     private String deterministicSummary(CodingTask task, String resultSummary, List<String> workflowSummaries,
-                                        List<String> changedFiles, List<String> previousPrompts) {
+                                        List<String> agentChangedFiles,
+                                        GitToolService.GitWorkspaceStatus gitStatus,
+                                        List<String> combinedChangedFiles,
+                                        List<String> previousPrompts) {
         return """
                 # Agent Run Report
 
@@ -125,6 +126,8 @@ public class ReportService {
                 - Result: %s
                 - Conversation memory: %s
                 - Changed files: %s
+                - Agent-recorded changes: %s
+                - Git status: %s
 
                 ## Key Outputs
 
@@ -134,12 +137,28 @@ public class ReportService {
                 previousPrompts.isEmpty()
                         ? "no previous prompt found in this conversation"
                         : "previous prompt was `%s`".formatted(previousPrompts.getFirst()),
-                changedFiles.isEmpty() ? "none" : String.join(", ", changedFiles),
+                combinedChangedFiles.isEmpty() ? "none" : String.join(", ", combinedChangedFiles),
+                agentChangedFiles.isEmpty() ? "none" : String.join(", ", agentChangedFiles),
+                gitStatus.available()
+                        ? (gitStatus.statusLines().isEmpty() ? "clean" : String.join("; ", gitStatus.statusLines()))
+                        : "unavailable: " + compact(gitStatus.summary(), 160),
                 workflowSummaries.isEmpty()
                         ? "- No workflow output summaries were recorded."
                         : workflowSummaries.stream().limit(8)
                         .map(summary -> "- " + summary)
                         .reduce("", (a, b) -> a + b + "\n").strip());
+    }
+
+    private String gitStatusSection(GitToolService.GitWorkspaceStatus gitStatus) {
+        if (!gitStatus.available()) {
+            return "- unavailable: " + compact(gitStatus.summary(), 300) + "\n";
+        }
+        if (gitStatus.statusLines().isEmpty()) {
+            return "- clean\n";
+        }
+        return gitStatus.statusLines().stream()
+                .map(line -> "- `" + line + "`")
+                .reduce("", (a, b) -> a + b + "\n");
     }
 
     private String compact(String value, int maxLength) {
@@ -148,23 +167,6 @@ public class ReportService {
         }
         var normalized = value.replaceAll("\\s+", " ").trim();
         return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength - 3) + "...";
-    }
-
-    private List<String> projectContextForModel(com.nask.agent.memory.ProjectProfile profile,
-                                                List<com.nask.agent.memory.MemoryRetrieval> retrievals) {
-        var context = new java.util.ArrayList<String>();
-        if (profile != null) {
-            context.add("Project profile: %s; frameworks %s; build tools %s; test tools %s; docs %s"
-                    .formatted(profile.languageSummary(), profile.frameworks(), profile.buildTools(),
-                            profile.testTools(), profile.docsPaths()));
-        }
-        retrievals.stream()
-                .limit(3)
-                .map(retrieval -> "Retrieval: %s; query `%s`; sources %s"
-                        .formatted(retrieval.summary(), retrieval.queryText(),
-                                retrieval.resultRefs().stream().map(this::sourceRef).limit(8).toList()))
-                .forEach(context::add);
-        return context;
     }
 
     private String sourceRef(com.nask.agent.memory.SourceReference ref) {

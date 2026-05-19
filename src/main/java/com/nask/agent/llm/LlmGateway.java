@@ -25,11 +25,6 @@ public interface LlmGateway {
     PlanDraft replan(ExecutionContext context, String failureSummary);
 
     /**
-     * Suggests whether and how to validate the completed work.
-     */
-    ValidationDecision suggestValidation(ValidationContext context);
-
-    /**
      * Drafts the narrative part of the final report.
      */
     FinalReportDraft generateReport(ReportContext context);

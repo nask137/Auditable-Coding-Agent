@@ -24,12 +24,9 @@ class LlmPromptFactoryTests {
                 UUID.randomUUID(), UUID.randomUUID(), "create note", List.of(note)));
         var planPrompt = prompts.planDraft(new PlanningContext(UUID.randomUUID(), UUID.randomUUID(),
                 understanding, List.of("README.md"), List.of(note)));
-        var validationPrompt = prompts.validationDecision(new ValidationContext(UUID.randomUUID(),
-                UUID.randomUUID(), UUID.randomUUID(), List.of(note)));
 
         assertThat(taskPrompt.user()).contains(note);
         assertThat(planPrompt.user()).contains(note);
-        assertThat(validationPrompt.user()).contains(note);
     }
 
     @Test
@@ -53,25 +50,10 @@ class LlmPromptFactoryTests {
     }
 
     @Test
-    void validationPromptIsRiskBasedAndDefaultsToSkipWhenNoFilesChanged() {
-        var prompt = prompts.validationDecision(new ValidationContext(UUID.randomUUID(), UUID.randomUUID(),
-                UUID.randomUUID(), List.of(), null, "REVIEW", "explain this code", List.of(), List.of()));
-
-        assertThat(prompt.version()).isEqualTo("validation-decision-v2");
-        assertThat(prompt.user())
-                .contains("\"shouldValidate\": false")
-                .contains("\"executableAndArgs\": []")
-                .contains("Validation is risk-based, not mandatory")
-                .contains("no files changed")
-                .contains("read-only review")
-                .doesNotContain("\"executableAndArgs\": [\"mvn\", \"test\"]");
-    }
-
-    @Test
     void finalReportPromptIncludesToolObservations() {
         var prompt = prompts.finalReport(new ReportContext(UUID.randomUUID(), UUID.randomUUID(),
                 "这个项目是做什么的", "Task completed.", List.of("execute_plan_item SUCCESS - Read README.md"),
-                List.of(), List.of(), List.of("read_file success=true payload={content=# Auditable Coding Agent}"),
+                List.of(), List.of(), List.of(), List.of("read_file success=true payload={content=# Auditable Coding Agent}"),
                 List.of("Project profile: Java; frameworks [Spring Boot]")));
 
         assertThat(prompt.user())

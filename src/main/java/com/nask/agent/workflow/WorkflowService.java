@@ -122,12 +122,18 @@ public class WorkflowService {
                     node("project_scan", Domain.WorkflowNodeType.PROJECT_SCAN),
                     node("project_memory", Domain.WorkflowNodeType.PROJECT_MEMORY),
                     node("code_understanding", Domain.WorkflowNodeType.CODE_UNDERSTANDING),
+                    node("create_plan", Domain.WorkflowNodeType.PLAN_CREATION),
+                    node("execute_plan_item", Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION),
+                    node("validate", Domain.WorkflowNodeType.VALIDATION),
                     node("report", Domain.WorkflowNodeType.REPORT),
                     node("finish", Domain.WorkflowNodeType.FINISH));
             case TEST -> List.of(
                     node("inspect_workspace", Domain.WorkflowNodeType.WORKSPACE_INSPECTION),
                     node("project_scan", Domain.WorkflowNodeType.PROJECT_SCAN),
                     node("project_memory", Domain.WorkflowNodeType.PROJECT_MEMORY),
+                    node("code_understanding", Domain.WorkflowNodeType.CODE_UNDERSTANDING),
+                    node("create_plan", Domain.WorkflowNodeType.PLAN_CREATION),
+                    node("execute_plan_item", Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION),
                     node("validate", Domain.WorkflowNodeType.VALIDATION),
                     node("report", Domain.WorkflowNodeType.REPORT),
                     node("finish", Domain.WorkflowNodeType.FINISH));
@@ -153,12 +159,24 @@ public class WorkflowService {
                     edge("inspect_workspace", "project_scan", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("project_scan", "project_memory", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("project_memory", "code_understanding", Domain.WorkflowEdgeType.ON_SUCCESS),
-                    edge("code_understanding", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("code_understanding", "create_plan", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("create_plan", "execute_plan_item", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("execute_plan_item", "execute_plan_item", Domain.WorkflowEdgeType.CONDITION,
+                            "plan.hasPendingItems"),
+                    edge("execute_plan_item", "validate", Domain.WorkflowEdgeType.CONDITION, "plan.completed"),
+                    edge("validate", "execute_plan_item", Domain.WorkflowEdgeType.CONDITION, "plan.hasPendingItems"),
+                    edge("validate", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("report", "finish", Domain.WorkflowEdgeType.ON_SUCCESS));
             case TEST -> List.of(
                     edge("inspect_workspace", "project_scan", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("project_scan", "project_memory", Domain.WorkflowEdgeType.ON_SUCCESS),
-                    edge("project_memory", "validate", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("project_memory", "code_understanding", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("code_understanding", "create_plan", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("create_plan", "execute_plan_item", Domain.WorkflowEdgeType.ON_SUCCESS),
+                    edge("execute_plan_item", "execute_plan_item", Domain.WorkflowEdgeType.CONDITION,
+                            "plan.hasPendingItems"),
+                    edge("execute_plan_item", "validate", Domain.WorkflowEdgeType.CONDITION, "plan.completed"),
+                    edge("validate", "execute_plan_item", Domain.WorkflowEdgeType.CONDITION, "plan.hasPendingItems"),
                     edge("validate", "report", Domain.WorkflowEdgeType.ON_SUCCESS),
                     edge("report", "finish", Domain.WorkflowEdgeType.ON_SUCCESS));
             default -> List.of(

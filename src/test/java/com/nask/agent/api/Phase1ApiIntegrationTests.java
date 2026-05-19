@@ -308,7 +308,7 @@ class Phase1ApiIntegrationTests {
         assertThat(jdbc.queryForObject("select count(*) from command_execution where run_id = ?", Integer.class, java.util.UUID.fromString(runId)))
                 .isEqualTo(1);
         assertThat(jdbc.queryForObject(
-                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                "select status from agent_step where run_id = ? and step_type = 'EXECUTE_PLAN_ITEM' order by started_at desc limit 1",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
 
         var approvals = getList("/api/approvals?status=PENDING");
@@ -343,7 +343,7 @@ class Phase1ApiIntegrationTests {
                    and tr.success = true
                 """, Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
         assertThat(jdbc.queryForObject(
-                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                "select status from agent_step where run_id = ? and step_type = 'EXECUTE_PLAN_ITEM' order by started_at desc limit 1",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
         assertThat(jdbc.queryForObject("""
                 select status
@@ -384,7 +384,7 @@ class Phase1ApiIntegrationTests {
 
         assertThat(run.get("status")).isEqualTo("WAITING_APPROVAL");
         assertThat(jdbc.queryForObject(
-                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                "select status from agent_step where run_id = ? and step_type = 'EXECUTE_PLAN_ITEM' order by started_at desc limit 1",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
 
         var approvals = getList("/api/approvals?status=PENDING");
@@ -395,7 +395,7 @@ class Phase1ApiIntegrationTests {
         var failedRun = getMap("/api/tasks/" + runId);
         assertThat(failedRun.get("status")).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject(
-                "select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+                "select status from agent_step where run_id = ? and step_type = 'EXECUTE_PLAN_ITEM' order by started_at desc limit 1",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("FAILED");
     }
 
@@ -523,7 +523,7 @@ class Phase1ApiIntegrationTests {
                 Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
         assertThat(jdbc.queryForObject("select status from command_execution where run_id = ?",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
-        assertThat(jdbc.queryForObject("select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+        assertThat(jdbc.queryForObject("select status from agent_step where run_id = ? and step_type = 'EXECUTE_PLAN_ITEM' order by started_at desc limit 1",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("COMPLETED");
         assertThat(getList("/api/tasks/" + runId + "/workflow/nodes"))
                 .extracting(node -> node.get("nodeId"))
@@ -564,9 +564,11 @@ class Phase1ApiIntegrationTests {
         assertThat(run.get("status")).isEqualTo("WAITING_APPROVAL");
         assertThat(jdbc.queryForObject("""
                 select status
-                  from workflow_node_execution
+                 from workflow_node_execution
                  where run_id = ?
-                   and node_id = 'validate'
+                   and node_id = 'execute_plan_item'
+                 order by started_at desc
+                 limit 1
                 """, String.class, java.util.UUID.fromString(runId))).isEqualTo("WAITING_APPROVAL");
 
         var approvals = getList("/api/approvals?status=PENDING");
@@ -577,15 +579,17 @@ class Phase1ApiIntegrationTests {
         assertThat(failedRun.get("status")).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject("""
                 select count(*)
-                  from workflow_node_execution
+                 from workflow_node_execution
                  where run_id = ?
-                   and node_id = 'validate'
-                """, Integer.class, java.util.UUID.fromString(runId))).isEqualTo(1);
+                   and node_id = 'execute_plan_item'
+                """, Integer.class, java.util.UUID.fromString(runId))).isEqualTo(2);
         assertThat(jdbc.queryForObject("""
                 select status
-                  from workflow_node_execution
+                 from workflow_node_execution
                  where run_id = ?
-                   and node_id = 'validate'
+                   and node_id = 'execute_plan_item'
+                 order by started_at desc
+                 limit 1
                 """, String.class, java.util.UUID.fromString(runId))).isEqualTo("FAILURE");
     }
 
@@ -618,13 +622,15 @@ class Phase1ApiIntegrationTests {
                 Integer.class, java.util.UUID.fromString(runId))).isZero();
         assertThat(jdbc.queryForObject("select status from command_execution where run_id = ?",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("BLOCKED");
-        assertThat(jdbc.queryForObject("select status from agent_step where run_id = ? and step_type = 'VALIDATE'",
+        assertThat(jdbc.queryForObject("select status from agent_step where run_id = ? and step_type = 'EXECUTE_PLAN_ITEM' order by started_at desc limit 1",
                 String.class, java.util.UUID.fromString(runId))).isEqualTo("FAILED");
         assertThat(jdbc.queryForObject("""
                 select status
-                  from workflow_node_execution
+                 from workflow_node_execution
                  where run_id = ?
-                   and node_id = 'validate'
+                   and node_id = 'execute_plan_item'
+                 order by started_at desc
+                 limit 1
                 """, String.class, java.util.UUID.fromString(runId))).isEqualTo("BLOCKED");
     }
 
@@ -706,5 +712,6 @@ class Phase1ApiIntegrationTests {
         return ((List<?>) value).stream().map(Object::toString).toList();
     }
 }
+
 
 

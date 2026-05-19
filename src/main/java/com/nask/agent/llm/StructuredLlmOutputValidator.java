@@ -14,7 +14,9 @@ import java.util.Set;
 @Component
 public class StructuredLlmOutputValidator {
     private static final Set<String> ACTION_TYPES = Set.of("LIST_FILES", "READ_FILE", "SEARCH_TEXT",
-            "CREATE_DIRECTORY", "CREATE_FILE", "APPLY_PATCH", "GIT_STATUS", "GIT_DIFF");
+            "CREATE_DIRECTORY", "CREATE_FILE", "APPLY_PATCH", "GIT_STATUS", "GIT_DIFF",
+            "GIT_ADD", "GIT_COMMIT", "GIT_PUSH", "GIT_PULL", "GIT_FETCH", "GIT_LOG",
+            "GIT_SHOW", "GIT_BRANCH", "GIT_CHECKOUT", "RUN_COMMAND");
 
     private final Validator validator;
 
@@ -38,7 +40,6 @@ public class StructuredLlmOutputValidator {
             case TaskUnderstanding understanding -> validateTaskUnderstanding(understanding);
             case PlanDraft plan -> validatePlanDraft(plan);
             case AgentDecision decision -> validateAgentDecision(decision);
-            case ValidationDecision decision -> validateValidationDecision(decision);
             default -> {
             }
         }
@@ -97,10 +98,53 @@ public class StructuredLlmOutputValidator {
                 requireStringValue(input, "newText");
                 validateWorkspaceRelativePath(input.get("path").toString(), "path");
             }
-            case "GIT_STATUS", "GIT_DIFF" -> {
+            case "GIT_STATUS", "GIT_DIFF", "GIT_BRANCH" -> {
                 if (input.containsKey("workingDirectory")) {
                     requireString(input, "workingDirectory");
                     validateWorkspaceRelativePath(input.get("workingDirectory").toString(), "workingDirectory");
+                }
+            }
+            case "GIT_ADD" -> {
+                validateOptionalWorkingDirectory(input);
+                if (input.get("paths") instanceof java.util.List<?> paths) {
+                    for (var path : paths) {
+                        validateWorkspaceRelativePath(path.toString(), "paths");
+                    }
+                }
+            }
+            case "GIT_COMMIT" -> {
+                validateOptionalWorkingDirectory(input);
+                requireString(input, "message");
+            }
+            case "GIT_PUSH", "GIT_PULL" -> {
+                validateOptionalWorkingDirectory(input);
+                validateOptionalString(input, "remote");
+                validateOptionalString(input, "branch");
+            }
+            case "GIT_FETCH" -> {
+                validateOptionalWorkingDirectory(input);
+                validateOptionalString(input, "remote");
+            }
+            case "GIT_LOG" -> {
+                validateOptionalWorkingDirectory(input);
+                if (input.containsKey("maxCount")) {
+                    requireNumber(input, "maxCount");
+                }
+            }
+            case "GIT_SHOW" -> {
+                validateOptionalWorkingDirectory(input);
+                validateOptionalString(input, "revision");
+            }
+            case "GIT_CHECKOUT" -> {
+                validateOptionalWorkingDirectory(input);
+                requireString(input, "ref");
+            }
+            case "RUN_COMMAND" -> {
+                requireString(input, "executable");
+                validateOptionalWorkingDirectory(input);
+                if (input.containsKey("arguments") && !(input.get("arguments") instanceof java.util.List<?>)) {
+                    throw new LlmGatewayException("Action input requires list field: arguments",
+                            Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
                 }
             }
             default -> throw new LlmGatewayException("Unsupported action type from model: " + type,
@@ -108,9 +152,16 @@ public class StructuredLlmOutputValidator {
         }
     }
 
-    private void validateValidationDecision(ValidationDecision decision) {
-        if (decision.shouldValidate() && decision.executableAndArgs().isEmpty()) {
-            throw new LlmGatewayException("Validation decision must include executableAndArgs when shouldValidate is true",
+    private void validateOptionalWorkingDirectory(Map<String, Object> input) {
+        if (input.containsKey("workingDirectory")) {
+            requireString(input, "workingDirectory");
+            validateWorkspaceRelativePath(input.get("workingDirectory").toString(), "workingDirectory");
+        }
+    }
+
+    private void validateOptionalString(Map<String, Object> input, String key) {
+        if (input.containsKey(key) && !(input.get(key) instanceof String)) {
+            throw new LlmGatewayException("Action input requires string field: " + key,
                     Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
     }

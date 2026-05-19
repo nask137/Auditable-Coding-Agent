@@ -8,15 +8,17 @@ import java.util.List;
  */
 public record ReportContext(UUID taskId, UUID runId, String taskSummary, String resultSummary,
                             List<String> workflowSummaries, List<String> changedFiles,
+                            List<String> gitStatusLines,
                             List<String> previousConversationPrompts, List<String> recentToolObservations,
                             List<String> projectContext) {
     public ReportContext(UUID taskId, UUID runId, String taskSummary, String resultSummary) {
-        this(taskId, runId, taskSummary, resultSummary, List.of(), List.of(), List.of(), List.of(), List.of());
+        this(taskId, runId, taskSummary, resultSummary, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     public ReportContext {
         workflowSummaries = workflowSummaries == null ? List.of() : List.copyOf(workflowSummaries);
         changedFiles = changedFiles == null ? List.of() : List.copyOf(changedFiles);
+        gitStatusLines = gitStatusLines == null ? List.of() : List.copyOf(gitStatusLines);
         previousConversationPrompts = previousConversationPrompts == null
                 ? List.of() : List.copyOf(previousConversationPrompts);
         recentToolObservations = recentToolObservations == null ? List.of() : List.copyOf(recentToolObservations);

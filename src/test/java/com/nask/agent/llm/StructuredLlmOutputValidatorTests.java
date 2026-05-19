@@ -43,9 +43,18 @@ class StructuredLlmOutputValidatorTests {
     }
 
     @Test
+    void acceptsRunCommandToolIntent() {
+        var decision = new AgentDecision(UUID.randomUUID(), List.of(
+                new AgentDecision.Action("RUN_COMMAND", "Run tests",
+                        Map.of("executable", "mvn", "arguments", List.of("test"), "workingDirectory", "."))));
+
+        assertThat(validator.validate(decision)).isSameAs(decision);
+    }
+
+    @Test
     void rejectsUnsupportedToolIntent() {
         var decision = new AgentDecision(UUID.randomUUID(), List.of(
-                new AgentDecision.Action("RUN_COMMAND", "Bypass runtime", Map.of("executable", "mvn"))));
+                new AgentDecision.Action("DELETE_REPO", "Bypass runtime", Map.of())));
 
         assertThatThrownBy(() -> validator.validate(decision))
                 .isInstanceOf(LlmGatewayException.class)

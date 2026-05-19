@@ -43,20 +43,21 @@ class HttpLlmGatewayTests {
     }
 
     @Test
-    void rejectsUnsupportedStructuredDecisionBeforeRuntimeToolExecution() {
+    void acceptsRunCommandStructuredDecisionBeforeRuntimeToolExecution() {
         var auditService = mock(AuditService.class);
         when(auditService.append(any())).thenReturn(UUID.randomUUID());
         ChatCompletionClient client = prompt -> new ChatCompletionResult("deepseek-v4-pro",
-                "{\"planItemId\":\"00000000-0000-0000-0000-000000000001\",\"actions\":[{\"type\":\"RUN_COMMAND\",\"reason\":\"Run tests\",\"input\":{\"executable\":\"mvn\"}}]}",
+                "{\"planItemId\":\"00000000-0000-0000-0000-000000000001\",\"actions\":[{\"type\":\"RUN_COMMAND\",\"reason\":\"Run tests\",\"input\":{\"executable\":\"mvn\",\"arguments\":[\"test\"],\"workingDirectory\":\".\"}}]}",
                 "stop", 1, 2, 3);
         var gateway = new HttpLlmGateway(new LlmPromptFactory(), client, new ObjectMapper(), validator, auditService);
         var item = new PlanItem(UUID.fromString("00000000-0000-0000-0000-000000000001"), UUID.randomUUID(),
                 "Run tests", "PENDING", List.of(), "notes", 1, Instant.now(), Instant.now());
 
-        assertThatThrownBy(() -> gateway.decideNextAction(new ExecutionContext(UUID.randomUUID(), UUID.randomUUID(),
-                UUID.randomUUID(), item, List.of())))
-                .isInstanceOf(LlmGatewayException.class)
-                .hasMessageContaining("Unsupported action type");
+        var decision = gateway.decideNextAction(new ExecutionContext(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), item, List.of()));
+
+        assertThat(decision.actions()).hasSize(1);
+        assertThat(decision.actions().getFirst().type()).isEqualTo("RUN_COMMAND");
     }
 
     @Test

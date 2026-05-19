@@ -7,16 +7,11 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -24,26 +19,21 @@ import java.util.concurrent.TimeUnit;
  */
 @Service
 public class WorkspaceIgnoreService {
-    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
-
     private final AgentSettings settings;
-    private final Map<UUID, CachedIgnoreView> cache = new ConcurrentHashMap<>();
 
     public WorkspaceIgnoreService(AgentSettings settings) {
         this.settings = settings;
     }
 
     /**
-     * Returns cached Git ignored path prefixes for a workspace.
+     * Returns Git ignored path prefixes for a workspace.
+     *
+     * <p>This deliberately recomputes on every call. The agent may edit
+     * {@code .gitignore} during a run, and stale ignore metadata can expose files
+     * that should no longer be scanned.</p>
      */
     public IgnoreView ignoreView(Workspace workspace) {
-        var cached = cache.get(workspace.id());
-        if (cached != null && cached.expiresAt().isAfter(Instant.now())) {
-            return cached.view();
-        }
-        var computed = compute(workspace);
-        cache.put(workspace.id(), new CachedIgnoreView(computed, Instant.now().plus(CACHE_TTL)));
-        return computed;
+        return compute(workspace);
     }
 
     private IgnoreView compute(Workspace workspace) {
@@ -181,9 +171,6 @@ public class WorkspaceIgnoreService {
             ignoredFiles = ignoredFiles == null ? List.of() : List.copyOf(ignoredFiles);
             ignoredPrefixes = ignoredPrefixes == null ? List.of() : List.copyOf(ignoredPrefixes);
         }
-    }
-
-    private record CachedIgnoreView(IgnoreView view, Instant expiresAt) {
     }
 
     private record ProcessResult(int exitCode, String output) {

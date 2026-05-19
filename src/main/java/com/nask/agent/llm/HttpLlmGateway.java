@@ -71,12 +71,6 @@ public class HttpLlmGateway implements LlmGateway {
     }
 
     @Override
-    public ValidationDecision suggestValidation(ValidationContext context) {
-        return invoke(context.taskId(), context.runId(), null, "suggest validation",
-                promptFactory.validationDecision(context), ValidationDecision.class);
-    }
-
-    @Override
     public FinalReportDraft generateReport(ReportContext context) {
         return invoke(context.taskId(), context.runId(), null, "generate report",
                 promptFactory.finalReport(context), FinalReportDraft.class);
@@ -157,7 +151,6 @@ public class HttpLlmGateway implements LlmGateway {
             case TaskUnderstanding understanding -> understanding.summary();
             case PlanDraft plan -> "Created " + plan.items().size() + " plan items";
             case AgentDecision decision -> "Proposed " + decision.actions().size() + " tool actions";
-            case ValidationDecision validation -> validation.reason();
             case FinalReportDraft report -> report.markdown().lines().findFirst().orElse("Report drafted");
             default -> parsed.getClass().getSimpleName();
         };
