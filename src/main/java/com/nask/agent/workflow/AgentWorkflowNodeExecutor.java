@@ -15,7 +15,6 @@ import com.nask.agent.llm.LlmGatewayException;
 import com.nask.agent.llm.PlanningContext;
 import com.nask.agent.llm.TaskContext;
 import com.nask.agent.llm.TaskUnderstanding;
-import com.nask.agent.llm.ValidationContext;
 import com.nask.agent.memory.MemoryQuery;
 import com.nask.agent.memory.MemoryWriteProposalService;
 import com.nask.agent.memory.ProjectContextRetriever;
@@ -234,7 +233,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 "Create plan");
         var understanding = new TaskUnderstanding(
                 string(state.transientValue("taskSummary"), state.task().userRequest()),
-                string(state.transientValue("taskType"), "CODE_EDIT"),
+                string(state.transientValue("taskType"), state.execution().agentMode()),
                 list(state.transientValue("constraints")),
                 list(state.transientValue("searchHints")));
         var planDraft = callModelWithRecovery(state, step.id(), null, "create plan",
@@ -252,6 +251,10 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     }
 
     private NodeExecutionResult executePlanItem(AgentState state) {
+        var resumed = resumeApprovedCommandIfPresent(state);
+        if (resumed != null) {
+            return resumed;
+        }
         if (state.plan() == null || state.currentPlanItem() == null) {
             return NodeExecutionResult.success("No pending plan items", Map.of());
         }
@@ -271,14 +274,39 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                     Domain.RiskLevel.MEDIUM);
             var context = new ToolExecutionContext(state.task().id(), state.execution().id(), step.id(), action.id(),
                     state.workspace());
-            last = executeAction(context, actionDraft.type(), actionDraft.input(), actionDraft.reason());
+            last = reviewAllowsAction(state, actionDraft.type())
+                    ? executeAction(context, actionDraft.type(), actionDraft.input(), actionDraft.reason())
+                    : ToolExecutionResult.blocked("Review workflow is read-only; action not allowed: "
+                    + actionDraft.type());
             if (last.waitingApproval()) {
                 stepService.markWaitingApproval(state.task().id(), state.execution().id(), step, last.summary());
                 return NodeExecutionResult.waitingApproval(last.summary(), Map.of("stepId", step.id().toString()));
             }
             if (last.blocked()) {
+                if ("RUN_COMMAND".equals(actionDraft.type())) {
+                    stepService.fail(state.task().id(), state.execution().id(), step, last.summary());
+                    planService.updateItemStatus(item.id(), Domain.PlanItemStatus.FAILED);
+                    return NodeExecutionResult.blocked(last.summary());
+                }
                 var failure = runtimeFailureService.record(state.task().id(), state.execution().id(), step.id(), item.id(),
                         failureClassifier.fromToolResult(last), last.summary(), last.summary());
+                if (Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name().equals(failure.strategy())) {
+                    return replanCurrentItem(state, state.plan(), item, observedFiles, step.id(), failure,
+                            last.summary());
+                }
+                if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
+                    askUser(state, step.id(), item.id(), failure);
+                    stepService.markWaitingUserInput(state.task().id(), state.execution().id(), step, failure.summary());
+                    return NodeExecutionResult.waitingUserInput(failure.summary(), Map.of("stepId", step.id().toString()));
+                }
+                stepService.complete(state.task().id(), state.execution().id(), step, last.summary());
+                return new NodeExecutionResult("BLOCKED", last.summary(), Map.of("stepId", step.id().toString()),
+                        failure.failureType(), failure.strategy(), state.plan().plan().id(), item.id());
+            }
+            if (commandFailed(actionDraft.type(), last)) {
+                var failure = runtimeFailureService.record(state.task().id(), state.execution().id(), step.id(), item.id(),
+                        Domain.RuntimeFailureType.COMMAND_EXECUTION_FAILED, "Command failed: " + last.summary(),
+                        last.summary());
                 if (Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name().equals(failure.strategy())) {
                     return replanCurrentItem(state, state.plan(), item, observedFiles, step.id(), failure,
                             last.summary());
@@ -300,86 +328,86 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 "planItemId", item.id().toString()));
     }
 
-    private NodeExecutionResult validate(AgentState state) {
+    private NodeExecutionResult resumeApprovedCommandIfPresent(AgentState state) {
         var approved = commandExecutionRepository.findApprovedWaitingByRun(state.execution().id());
-        if (approved.isPresent()) {
-            var command = approved.get();
-            var step = stepService.getRequired(command.stepId());
-            var result = commandToolService.resumeApprovedCommand(new ToolExecutionContext(state.task().id(),
-                    state.execution().id(), command.stepId(), command.actionId(), state.workspace()), command);
-            return finishValidationResult(state, step.id(), result);
+        if (approved.isEmpty()) {
+            return null;
         }
-        var changedFiles = changedFilesForRun(state);
-        if (!requiresValidation(state, changedFiles)) {
-            if (requiresFileChange(state)) {
-                return failNoFileChangesForEditTask(state, changedFiles);
-            }
-            if (state.plan() != null) {
-                planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
-            }
-            return NodeExecutionResult.success("Skipped validation because this run made no file changes", Map.of(
-                    "changedFiles", changedFiles));
+        var command = approved.get();
+        var step = stepService.getRequired(command.stepId());
+        if (isReviewWorkflow(state)) {
+            var summary = "Review workflow is read-only; approved command will not be resumed";
+            stepService.fail(state.task().id(), state.execution().id(), step, summary);
+            return NodeExecutionResult.blocked(summary);
         }
-        var decision = callModelWithRecovery(state, null, null, "suggest validation",
-                () -> llmGateway.suggestValidation(new ValidationContext(state.task().id(), state.execution().id(),
-                        state.workspace().id(), state.recoveryNotes(), state.memoryContext(),
-                        string(state.transientValue("taskType"), state.execution().agentMode()),
-                        state.task().userRequest(), changedFiles, recentCommandsForRun(state))));
-        if (decision == null) {
-            return NodeExecutionResult.waitingUserInput("Waiting for user input");
-        }
-        if (!decision.shouldValidate() || decision.executableAndArgs().isEmpty()) {
-            if (requiresFileChange(state)) {
-                return failNoFileChangesForEditTask(state, changedFiles);
-            }
-            if (state.plan() != null) {
-                planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
-            }
-            return NodeExecutionResult.success("No validation command selected", Map.of());
-        }
-        var step = stepService.start(state.task().id(), state.execution().id(), null, Domain.StepType.VALIDATE,
-                decision.reason());
-        var action = actionService.create(step.id(), Domain.ActionType.RUN_VALIDATION, decision.reason(),
-                Domain.RiskLevel.MEDIUM);
-        var executable = decision.executableAndArgs().getFirst();
-        var args = decision.executableAndArgs().subList(1, decision.executableAndArgs().size());
-        var result = commandToolService.runCommand(new ToolExecutionContext(state.task().id(), state.execution().id(),
-                step.id(), action.id(), state.workspace()), executable, args, ".", decision.reason());
+        var result = commandToolService.resumeApprovedCommand(new ToolExecutionContext(state.task().id(),
+                state.execution().id(), command.stepId(), command.actionId(), state.workspace()), command);
         if (result.waitingApproval()) {
             stepService.markWaitingApproval(state.task().id(), state.execution().id(), step, result.summary());
             return NodeExecutionResult.waitingApproval(result.summary(), Map.of("stepId", step.id().toString()));
         }
-        return finishValidationResult(state, step.id(), result);
+        if (result.blocked()) {
+            stepService.fail(state.task().id(), state.execution().id(), step, result.summary());
+            return new NodeExecutionResult("BLOCKED", result.summary(), Map.of("stepId", step.id().toString()),
+                    null, null, null, null);
+        }
+        if (commandFailed("RUN_COMMAND", result)) {
+            stepService.fail(state.task().id(), state.execution().id(), step, result.summary());
+            if (step.planItemId() != null) {
+                planService.updateItemStatus(step.planItemId(), Domain.PlanItemStatus.FAILED);
+            }
+            return NodeExecutionResult.failure("Command failed: " + result.summary(),
+                    Map.of("stepId", step.id().toString()));
+        }
+        stepService.complete(state.task().id(), state.execution().id(), step, result.summary());
+        if (step.planItemId() != null) {
+            planService.updateItemStatus(step.planItemId(), Domain.PlanItemStatus.COMPLETED);
+        }
+        var payload = new java.util.HashMap<String, Object>(result.payload());
+        payload.put("stepId", step.id().toString());
+        if (step.planItemId() != null) {
+            payload.put("planItemId", step.planItemId().toString());
+        }
+        return NodeExecutionResult.success(result.summary(), payload);
     }
 
-    private boolean requiresValidation(AgentState state, List<String> changedFiles) {
-        if (Domain.WorkflowMode.TEST.name().equals(state.workflow().mode())) {
-            return true;
+    private NodeExecutionResult validate(AgentState state) {
+        var changedFiles = changedFilesForRun(state);
+        if (requiresFileChange(state) && changedFiles.isEmpty()) {
+            return failNoFileChangesForEditTask(state, changedFiles);
         }
-        var taskType = string(state.transientValue("taskType"), state.execution().agentMode());
-        if ("TEST".equalsIgnoreCase(taskType)) {
-            return true;
+        var validationCommands = completedCommandsForRun(state);
+        if (requiresValidationCommand(state) && validationCommands.isEmpty()) {
+            if (state.plan() != null) {
+                planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.FAILED);
+            }
+            return NodeExecutionResult.failure("No validation command was run for a test workflow",
+                    Map.of("changedFiles", changedFiles, "validationCommandCount", 0));
         }
-        return !changedFiles.isEmpty() || explicitlyAskedForValidation(state.task().userRequest());
-    }
-
-    private boolean explicitlyAskedForValidation(String request) {
-        if (request == null) {
-            return false;
+        for (var command : validationCommands) {
+            validationService.record(state.task().id(), state.execution().id(), null, command.id(),
+                    Domain.ValidationType.TEST, command.exitCode() != null && command.exitCode() == 0,
+                    command.outputSummary() == null ? command.command() : command.outputSummary());
         }
-        var lower = request.toLowerCase(java.util.Locale.ROOT);
-        return lower.contains("run test")
-                || lower.contains("run tests")
-                || lower.contains("mvn test")
-                || lower.contains("validate")
-                || lower.contains("validation")
-                || lower.contains("测试")
-                || lower.contains("验证");
+        if (state.plan() != null) {
+            planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
+        }
+        var summary = validationCommands.isEmpty()
+                ? "Validation finalized without a command"
+                : "Validation passed: finalized from " + validationCommands.size() + " command(s)";
+        return NodeExecutionResult.success(summary, Map.of("changedFiles", changedFiles,
+                "validationCommandCount", validationCommands.size()));
     }
 
     private boolean requiresFileChange(AgentState state) {
         var taskType = string(state.transientValue("taskType"), state.execution().agentMode());
         return "CODE_EDIT".equalsIgnoreCase(taskType) || "BUG_FIX".equalsIgnoreCase(taskType);
+    }
+
+    private boolean requiresValidationCommand(AgentState state) {
+        var taskType = string(state.transientValue("taskType"), state.execution().agentMode());
+        return Domain.WorkflowMode.TEST.name().equals(state.workflow().mode())
+                || "TEST".equalsIgnoreCase(taskType);
     }
 
     private List<String> changedFilesForRun(AgentState state) {
@@ -390,79 +418,11 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                 .toList();
     }
 
-    private List<String> recentCommandsForRun(AgentState state) {
+    private List<com.nask.agent.command.CommandExecution> completedCommandsForRun(AgentState state) {
         return state.recentCommandExecutions().stream()
                 .filter(command -> state.execution().id().equals(command.runId()))
-                .map(command -> command.command())
-                .limit(8)
+                .filter(command -> Domain.CommandExecutionStatus.COMPLETED.name().equals(command.status()))
                 .toList();
-    }
-
-    private NodeExecutionResult finishValidationResult(AgentState state, UUID stepId, ToolExecutionResult result) {
-        var step = stepService.getRequired(stepId);
-        if (result.blocked() || result.waitingApproval()) {
-            stepService.fail(state.task().id(), state.execution().id(), step, result.summary());
-            return NodeExecutionResult.blocked(result.summary());
-        }
-        var exitCode = integer(result.payload().get("exitCode"), 1);
-        var commandId = result.payload().get("commandId") == null ? null
-                : UUID.fromString(result.payload().get("commandId").toString());
-        validationService.record(state.task().id(), state.execution().id(), step.id(), commandId, Domain.ValidationType.TEST,
-                exitCode == 0, result.summary());
-        stepService.complete(state.task().id(), state.execution().id(), step, result.summary());
-        if (exitCode != 0) {
-            var failure = runtimeFailureService.record(state.task().id(), state.execution().id(), step.id(), null,
-                    Domain.RuntimeFailureType.VALIDATION_FAILED, "Validation failed: " + result.summary(),
-                    result.summary());
-            if (isValidationOnlyRun(state)) {
-                if (state.plan() != null) {
-                    planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.FAILED);
-                }
-                return NodeExecutionResult.failure("Validation failed: " + result.summary(),
-                        Map.of("stepId", step.id().toString(),
-                                "failureId", failure.id().toString(),
-                                "changedFiles", changedFilesForRun(state)));
-            }
-            if (Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN.name().equals(failure.strategy())
-                    && state.plan() != null) {
-                var currentItem = state.plan().items().isEmpty() ? null : state.plan().items().getLast();
-                var recoveryDraft = callModelWithRecovery(state, step.id(), null, "replan after validation failure",
-                        () -> llmGateway.replan(new ExecutionContext(state.task().id(), state.execution().id(), step.id(),
-                                currentItem, List.of(), toolRecordRepository.findRecentSummariesByRun(state.execution().id(), 8),
-                                state.recoveryNotes(), state.memoryContext()), result.summary()));
-                if (recoveryDraft != null) {
-                    planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.ACTIVE);
-                    planService.appendRecoveryItems(state.task().id(), state.execution().id(), state.plan().plan().id(),
-                            recoveryDraft, null, result.summary(), failure.id());
-                    return NodeExecutionResult.success("Validation failed; recovery plan appended",
-                            Map.of("stepId", step.id().toString()));
-                }
-                stepService.markWaitingUserInput(state.task().id(), state.execution().id(), step, "Waiting for user input");
-                return NodeExecutionResult.waitingUserInput("Waiting for user input", Map.of("stepId", step.id().toString()));
-            }
-            if (Domain.RecoveryStrategy.ASK_USER.name().equals(failure.strategy())) {
-                askUser(state, step.id(), null, failure);
-                stepService.markWaitingUserInput(state.task().id(), state.execution().id(), step, failure.summary());
-                return NodeExecutionResult.waitingUserInput(failure.summary(), Map.of("stepId", step.id().toString()));
-            }
-            return NodeExecutionResult.failure("Validation failed: " + result.summary());
-        }
-        if (requiresFileChange(state) && changedFilesForRun(state).isEmpty()) {
-            return failNoFileChangesForEditTask(state, changedFilesForRun(state), step.id());
-        }
-        if (state.plan() != null) {
-            planService.updatePlanStatus(state.plan().plan().id(), Domain.PlanStatus.COMPLETED);
-        }
-        return NodeExecutionResult.success("Validation passed: " + result.summary(),
-                Map.of("stepId", step.id().toString()));
-    }
-
-    private boolean isValidationOnlyRun(AgentState state) {
-        if (Domain.WorkflowMode.TEST.name().equals(state.workflow().mode())) {
-            return true;
-        }
-        var taskType = string(state.transientValue("taskType"), state.execution().agentMode());
-        return "TEST".equalsIgnoreCase(taskType) && changedFilesForRun(state).isEmpty();
     }
 
     private NodeExecutionResult failNoFileChangesForEditTask(AgentState state, List<String> changedFiles) {
@@ -549,7 +509,46 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
             }
             case "GIT_STATUS" -> gitToolService.status(context, string(input.get("workingDirectory"), "."));
             case "GIT_DIFF" -> gitToolService.diff(context, string(input.get("workingDirectory"), "."));
+            case "GIT_ADD" -> gitToolService.add(context, string(input.get("workingDirectory"), "."),
+                    list(input.get("paths")));
+            case "GIT_COMMIT" -> gitToolService.commit(context, string(input.get("workingDirectory"), "."),
+                    string(input.get("message"), ""));
+            case "GIT_PUSH" -> gitToolService.push(context, string(input.get("workingDirectory"), "."),
+                    string(input.get("remote"), ""), string(input.get("branch"), ""));
+            case "GIT_PULL" -> gitToolService.pull(context, string(input.get("workingDirectory"), "."),
+                    string(input.get("remote"), ""), string(input.get("branch"), ""));
+            case "GIT_FETCH" -> gitToolService.fetch(context, string(input.get("workingDirectory"), "."),
+                    string(input.get("remote"), ""));
+            case "GIT_LOG" -> gitToolService.log(context, string(input.get("workingDirectory"), "."),
+                    integer(input.get("maxCount"), 10));
+            case "GIT_SHOW" -> gitToolService.show(context, string(input.get("workingDirectory"), "."),
+                    string(input.get("revision"), "HEAD"));
+            case "GIT_BRANCH" -> gitToolService.branch(context, string(input.get("workingDirectory"), "."));
+            case "GIT_CHECKOUT" -> gitToolService.checkout(context, string(input.get("workingDirectory"), "."),
+                    string(input.get("ref"), ""));
+            case "RUN_COMMAND" -> commandToolService.runCommand(context, string(input.get("executable"), ""),
+                    list(input.get("arguments")), string(input.get("workingDirectory"), "."), reason);
             default -> ToolExecutionResult.blocked("Unsupported action type: " + type);
+        };
+    }
+
+    private boolean commandFailed(String actionType, ToolExecutionResult result) {
+        return "RUN_COMMAND".equals(actionType) && integer(result.payload().get("exitCode"), 0) != 0;
+    }
+
+    private boolean reviewAllowsAction(AgentState state, String actionType) {
+        return !isReviewWorkflow(state) || isReadOnlyAction(actionType);
+    }
+
+    private boolean isReviewWorkflow(AgentState state) {
+        return Domain.WorkflowMode.REVIEW.name().equals(state.workflow().mode());
+    }
+
+    private boolean isReadOnlyAction(String actionType) {
+        return switch (actionType) {
+            case "LIST_FILES", "READ_FILE", "SEARCH_TEXT",
+                 "GIT_STATUS", "GIT_DIFF", "GIT_LOG", "GIT_SHOW", "GIT_BRANCH" -> true;
+            default -> false;
         };
     }
 

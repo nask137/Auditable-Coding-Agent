@@ -14,7 +14,6 @@ import com.nask.agent.llm.AgentDecision;
 import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.LlmGatewayException;
 import com.nask.agent.llm.PlanDraft;
-import com.nask.agent.llm.ValidationDecision;
 import com.nask.agent.memory.ProjectContextRetriever;
 import com.nask.agent.memory.ProjectMemoryService;
 import com.nask.agent.memory.MemoryWriteProposalService;
@@ -44,6 +43,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -90,9 +90,9 @@ class AgentWorkflowNodeExecutorTests {
         when(actionService.create(eq(step.id()), eq(Domain.ActionType.CALL_TOOL), any(), eq(Domain.RiskLevel.MEDIUM)))
                 .thenReturn(action);
         when(llmGateway.decideNextAction(any())).thenReturn(new AgentDecision(item.id(), List.of(
-                new AgentDecision.Action("RUN_COMMAND", "Unsupported intent", Map.of()))));
+                new AgentDecision.Action("DELETE_REPO", "Unsupported intent", Map.of()))));
         var failure = failure(ids, step.id(), item.id(), Domain.RuntimeFailureType.UNSUPPORTED_TOOL_INTENT,
-                Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM, "Unsupported action type: RUN_COMMAND");
+                Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM, "Unsupported action type: DELETE_REPO");
         when(runtimeFailureService.record(eq(ids.taskId()), eq(ids.runId()), eq(step.id()), eq(item.id()),
                 eq(Domain.RuntimeFailureType.UNSUPPORTED_TOOL_INTENT), any(), any())).thenReturn(failure);
         var recoveryDraft = new PlanDraft(List.of(new PlanDraft.Item("Read README.md after runtime rejection",
@@ -107,81 +107,120 @@ class AgentWorkflowNodeExecutorTests {
         assertThat(result.summary()).contains("recovery plan appended");
         verify(planService).updateItemStatus(item.id(), Domain.PlanItemStatus.FAILED);
         verify(planService).appendRecoveryItems(ids.taskId(), ids.runId(), ids.planId(), recoveryDraft, item.id(),
-                "Unsupported action type: RUN_COMMAND", failure.id());
+                "Unsupported action type: DELETE_REPO", failure.id());
         verify(stepService).complete(ids.taskId(), ids.runId(), step, "Runtime rejected action; recovery plan appended");
     }
 
     @Test
-    void appendsRecoveryPlanWhenValidationFails() {
+    void appendsRecoveryPlanWhenRunCommandFailsDuringPlanExecution() {
         var ids = ids();
-        var item = planItem(ids.planId(), "Validate");
-        var state = stateWithChanges(ids, new PlanView(plan(ids), List.of(item)), null, Map.of("taskType", "CODE_EDIT"),
+        var item = planItem(ids.planId(), "Run validation command");
+        var state = stateWithChanges(ids, new PlanView(plan(ids), List.of(item)), item, Map.of("taskType", "CODE_EDIT"),
                 List.of(fileChange(ids, "src/main/java/App.java")));
-        var step = step(ids.runId(), null, Domain.StepType.VALIDATE);
+        var step = step(ids.runId(), item.id(), Domain.StepType.EXECUTE_PLAN_ITEM);
         var action = action(step.id());
-        when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
-        when(llmGateway.suggestValidation(any())).thenReturn(new ValidationDecision(true, List.of("java", "-bad"),
-                "Run failing validation"));
-        when(stepService.start(ids.taskId(), ids.runId(), null, Domain.StepType.VALIDATE, "Run failing validation"))
+        when(stepService.start(ids.taskId(), ids.runId(), item.id(), Domain.StepType.EXECUTE_PLAN_ITEM,
+                item.description()))
                 .thenReturn(step);
         when(stepService.getRequired(step.id())).thenReturn(step);
-        when(actionService.create(step.id(), Domain.ActionType.RUN_VALIDATION, "Run failing validation",
-                Domain.RiskLevel.MEDIUM)).thenReturn(action);
+        when(actionService.create(eq(step.id()), eq(Domain.ActionType.CALL_TOOL), any(),
+                eq(Domain.RiskLevel.MEDIUM))).thenReturn(action);
         var commandId = UUID.randomUUID();
+        when(llmGateway.decideNextAction(any())).thenReturn(new AgentDecision(item.id(), List.of(
+                new AgentDecision.Action("RUN_COMMAND", "Run failing validation",
+                        Map.of("executable", "java", "arguments", List.of("-bad"), "workingDirectory", ".")))));
         when(commandToolService.runCommand(any(), eq("java"), eq(List.of("-bad")), eq("."), eq("Run failing validation")))
                 .thenReturn(ToolExecutionResult.success("exit 1", Map.of("exitCode", 1, "commandId", commandId)));
-        var failure = failure(ids, step.id(), null, Domain.RuntimeFailureType.VALIDATION_FAILED,
-                Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN, "Validation failed: exit 1");
-        when(runtimeFailureService.record(eq(ids.taskId()), eq(ids.runId()), eq(step.id()), eq(null),
-                eq(Domain.RuntimeFailureType.VALIDATION_FAILED), any(), any())).thenReturn(failure);
+        var failure = failure(ids, step.id(), item.id(), Domain.RuntimeFailureType.COMMAND_EXECUTION_FAILED,
+                Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM, "Command failed: exit 1");
+        when(runtimeFailureService.record(eq(ids.taskId()), eq(ids.runId()), eq(step.id()), eq(item.id()),
+                eq(Domain.RuntimeFailureType.COMMAND_EXECUTION_FAILED), any(), any())).thenReturn(failure);
         var recoveryDraft = new PlanDraft(List.of(new PlanDraft.Item("Fix validation failure", List.of(),
                 "Recover from failing command")));
         when(llmGateway.replan(any(), eq("exit 1"))).thenReturn(recoveryDraft);
 
         var result = executor.execute(state,
-                new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
+                new MapWorkflowNode("execute_plan_item", Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION.name(), Map.of()));
 
         assertThat(result.status()).isEqualTo("SUCCESS");
         assertThat(result.summary()).contains("recovery plan appended");
-        verify(validationService).record(ids.taskId(), ids.runId(), step.id(), commandId, Domain.ValidationType.TEST,
-                false, "exit 1");
-        verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.ACTIVE);
-        verify(planService).appendRecoveryItems(ids.taskId(), ids.runId(), ids.planId(), recoveryDraft, null,
+        verify(planService).updateItemStatus(item.id(), Domain.PlanItemStatus.FAILED);
+        verify(planService).appendRecoveryItems(ids.taskId(), ids.runId(), ids.planId(), recoveryDraft, item.id(),
                 "exit 1", failure.id());
     }
 
     @Test
-    void validationOnlyFailureDoesNotAppendRecoveryPlan() {
+    void reviewWorkflowBlocksWriteToolsDuringPlanExecution() {
         var ids = ids();
-        var state = state(ids, new PlanView(plan(ids), List.of()), null, Map.of("taskType", "TEST"));
-        var step = step(ids.runId(), null, Domain.StepType.VALIDATE);
+        var item = planItem(ids.planId(), "Attempt to stage changes");
+        var state = stateWithWorkflowMode(ids, new PlanView(plan(ids), List.of(item)), item,
+                Map.of("taskType", "REVIEW"), List.of(), "review only", List.of(), Domain.WorkflowMode.REVIEW);
+        var step = step(ids.runId(), item.id(), Domain.StepType.EXECUTE_PLAN_ITEM);
         var action = action(step.id());
-        when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
-        when(llmGateway.suggestValidation(any())).thenReturn(new ValidationDecision(true, List.of("mvn", "compile"),
-                "Compile project"));
-        when(stepService.start(ids.taskId(), ids.runId(), null, Domain.StepType.VALIDATE, "Compile project"))
+        when(stepService.start(ids.taskId(), ids.runId(), item.id(), Domain.StepType.EXECUTE_PLAN_ITEM,
+                item.description()))
                 .thenReturn(step);
         when(stepService.getRequired(step.id())).thenReturn(step);
-        when(actionService.create(step.id(), Domain.ActionType.RUN_VALIDATION, "Compile project",
-                Domain.RiskLevel.MEDIUM)).thenReturn(action);
+        when(actionService.create(eq(step.id()), eq(Domain.ActionType.CALL_TOOL), any(),
+                eq(Domain.RiskLevel.MEDIUM))).thenReturn(action);
+        when(llmGateway.decideNextAction(any())).thenReturn(new AgentDecision(item.id(), List.of(
+                new AgentDecision.Action("GIT_ADD", "Stage changes",
+                        Map.of("workingDirectory", ".", "paths", List.of("src/main/java/App.java"))))));
+        var failure = failure(ids, step.id(), item.id(), Domain.RuntimeFailureType.TOOL_PERMISSION_BLOCKED,
+                Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM,
+                "Review workflow is read-only; action not allowed: GIT_ADD");
+        when(runtimeFailureService.record(eq(ids.taskId()), eq(ids.runId()), eq(step.id()), eq(item.id()),
+                eq(Domain.RuntimeFailureType.TOOL_PERMISSION_BLOCKED), any(), any())).thenReturn(failure);
+        var recoveryDraft = new PlanDraft(List.of(new PlanDraft.Item("Inspect changes without writing",
+                List.of("src/main/java/App.java"), "Use read-only review tools")));
+        when(llmGateway.replan(any(), eq("Review workflow is read-only; action not allowed: GIT_ADD")))
+                .thenReturn(recoveryDraft);
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("execute_plan_item", Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.summary()).contains("recovery plan appended");
+        verify(gitToolService, never()).add(any(), any(), any());
+        verify(planService).appendRecoveryItems(ids.taskId(), ids.runId(), ids.planId(), recoveryDraft, item.id(),
+                "Review workflow is read-only; action not allowed: GIT_ADD", failure.id());
+    }
+
+    @Test
+    void validateFinalizesCompletedCommandsAsValidationResults() {
+        var ids = ids();
         var commandId = UUID.randomUUID();
-        when(commandToolService.runCommand(any(), eq("mvn"), eq(List.of("compile")), eq("."), eq("Compile project")))
-                .thenReturn(ToolExecutionResult.success("compile failed", Map.of("exitCode", 1, "commandId", commandId)));
-        var failure = failure(ids, step.id(), null, Domain.RuntimeFailureType.VALIDATION_FAILED,
-                Domain.RecoveryStrategy.REPLAN_REMAINING_PLAN, "Validation failed: compile failed");
-        when(runtimeFailureService.record(eq(ids.taskId()), eq(ids.runId()), eq(step.id()), eq(null),
-                eq(Domain.RuntimeFailureType.VALIDATION_FAILED), any(), any())).thenReturn(failure);
+        var command = new com.nask.agent.command.CommandExecution(commandId, ids.workspaceId(), ids.taskId(),
+                ids.runId(), UUID.randomUUID(), UUID.randomUUID(), "mvn test", "mvn", List.of("test"),
+                ".", Domain.CommandPolicyType.ALLOWLIST.name(), Domain.RiskLevel.MEDIUM.name(), null,
+                Domain.CommandExecutionStatus.COMPLETED.name(), 0, "tests passed", Instant.now(), Instant.now(),
+                Instant.now());
+        var state = stateWithCommands(ids, new PlanView(plan(ids), List.of()), null, Map.of("taskType", "TEST"),
+                List.of(), List.of(command));
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.summary()).contains("Validation passed");
+        verify(validationService).record(ids.taskId(), ids.runId(), null, commandId, Domain.ValidationType.TEST,
+                true, "tests passed");
+        verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.COMPLETED);
+    }
+
+    @Test
+    void failsTestWorkflowWhenNoValidationCommandRan() {
+        var ids = ids();
+        var state = stateWithWorkflowMode(ids, new PlanView(plan(ids), List.of()), null,
+                Map.of("taskType", "TEST"), List.of(), "run tests", List.of(), Domain.WorkflowMode.TEST);
 
         var result = executor.execute(state,
                 new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
 
         assertThat(result.status()).isEqualTo("FAILURE");
-        assertThat(result.summary()).contains("Validation failed");
-        verify(validationService).record(ids.taskId(), ids.runId(), step.id(), commandId, Domain.ValidationType.TEST,
-                false, "compile failed");
+        assertThat(result.summary()).contains("No validation command");
+        verify(validationService, never()).record(any(), any(), any(), any(), any(), anyBoolean(), any());
         verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.FAILED);
-        verify(llmGateway, never()).replan(any(), any());
-        verify(planService, never()).appendRecoveryItems(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -196,35 +235,27 @@ class AgentWorkflowNodeExecutorTests {
         assertThat(result.status()).isEqualTo("FAILURE");
         assertThat(result.summary()).contains("No file changes");
         verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.FAILED);
-        verify(llmGateway, never()).suggestValidation(any());
+        verify(llmGateway, never()).decideNextAction(any());
     }
 
     @Test
-    void failsEditTaskWhenValidationPassesButNoFileChangesWereMade() {
+    void failsEditTaskWithNoFileChangesEvenIfCommandsRan() {
         var ids = ids();
-        var state = stateWithRequest(ids, new PlanView(plan(ids), List.of()), null,
-                Map.of("taskType", "CODE_EDIT"), List.of(), "fix this and run tests");
-        var step = step(ids.runId(), null, Domain.StepType.VALIDATE);
-        var action = action(step.id());
-        when(commandExecutionRepository.findApprovedWaitingByRun(ids.runId())).thenReturn(java.util.Optional.empty());
-        when(llmGateway.suggestValidation(any())).thenReturn(new ValidationDecision(true, List.of("mvn", "test"),
-                "Run tests"));
-        when(stepService.start(ids.taskId(), ids.runId(), null, Domain.StepType.VALIDATE, "Run tests"))
-                .thenReturn(step);
-        when(stepService.getRequired(step.id())).thenReturn(step);
-        when(actionService.create(step.id(), Domain.ActionType.RUN_VALIDATION, "Run tests", Domain.RiskLevel.MEDIUM))
-                .thenReturn(action);
         var commandId = UUID.randomUUID();
-        when(commandToolService.runCommand(any(), eq("mvn"), eq(List.of("test")), eq("."), eq("Run tests")))
-                .thenReturn(ToolExecutionResult.success("tests passed", Map.of("exitCode", 0, "commandId", commandId)));
+        var command = new com.nask.agent.command.CommandExecution(commandId, ids.workspaceId(), ids.taskId(),
+                ids.runId(), UUID.randomUUID(), UUID.randomUUID(), "mvn test", "mvn", List.of("test"),
+                ".", Domain.CommandPolicyType.ALLOWLIST.name(), Domain.RiskLevel.MEDIUM.name(), null,
+                Domain.CommandExecutionStatus.COMPLETED.name(), 0, "tests passed", Instant.now(), Instant.now(),
+                Instant.now());
+        var state = stateWithRequest(ids, new PlanView(plan(ids), List.of()), null,
+                Map.of("taskType", "CODE_EDIT"), List.of(), "fix this and run tests", List.of(command));
 
         var result = executor.execute(state,
                 new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
 
         assertThat(result.status()).isEqualTo("FAILURE");
         assertThat(result.summary()).contains("No file changes");
-        verify(validationService).record(ids.taskId(), ids.runId(), step.id(), commandId, Domain.ValidationType.TEST,
-                true, "tests passed");
+        verify(validationService, never()).record(any(), any(), any(), any(), any(), anyBoolean(), any());
         verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.FAILED);
     }
 
@@ -238,9 +269,9 @@ class AgentWorkflowNodeExecutorTests {
                 new MapWorkflowNode("validate", Domain.WorkflowNodeType.VALIDATION.name(), Map.of()));
 
         assertThat(result.status()).isEqualTo("SUCCESS");
-        assertThat(result.summary()).contains("Skipped validation");
+        assertThat(result.summary()).contains("Validation finalized without a command");
         verify(planService).updatePlanStatus(ids.planId(), Domain.PlanStatus.COMPLETED);
-        verify(llmGateway, never()).suggestValidation(any());
+        verify(llmGateway, never()).decideNextAction(any());
     }
 
     @Test
@@ -304,17 +335,38 @@ class AgentWorkflowNodeExecutorTests {
 
     private AgentState stateWithRequest(Ids ids, PlanView plan, PlanItem currentItem,
                                         Map<String, Object> transientData, List<FileChange> changes, String request) {
+        return stateWithRequest(ids, plan, currentItem, transientData, changes, request, List.of());
+    }
+
+    private AgentState stateWithRequest(Ids ids, PlanView plan, PlanItem currentItem,
+                                        Map<String, Object> transientData, List<FileChange> changes, String request,
+                                        List<com.nask.agent.command.CommandExecution> commands) {
+        return stateWithWorkflowMode(ids, plan, currentItem, transientData, changes, request, commands,
+                Domain.WorkflowMode.CODING);
+    }
+
+    private AgentState stateWithWorkflowMode(Ids ids, PlanView plan, PlanItem currentItem,
+                                            Map<String, Object> transientData, List<FileChange> changes,
+                                            String request,
+                                            List<com.nask.agent.command.CommandExecution> commands,
+                                            Domain.WorkflowMode workflowMode) {
         var now = Instant.now();
         var task = new CodingTask(ids.taskId(), ids.workspaceId(), null, 1, "task", request,
                 Domain.TaskStatus.RUNNING.name(), "CODE_EDIT", now, null, null,
-                Map.of("workflow", "coding-agent"), now, now);
+                Map.of("workflow", workflowMode.name().toLowerCase(java.util.Locale.ROOT) + "-agent"), now, now);
         var run = task;
         var workspace = new Workspace(ids.workspaceId(), "workspace", "D:/tmp/workspace", true, List.of(), List.of(),
                 List.of(), now, now);
-        var workflow = new WorkflowDefinition(ids.workflowId(), "coding-agent", 1, "Coding",
-                Domain.WorkflowMode.CODING.name(), true, Map.of(), now, now);
-        return new AgentState(task, run, workspace, workflow, plan, currentItem, changes, List.of(), List.of(),
+        var workflow = new WorkflowDefinition(ids.workflowId(), workflowMode.name().toLowerCase(java.util.Locale.ROOT)
+                + "-agent", 1, workflowMode.name(), workflowMode.name(), true, Map.of(), now, now);
+        return new AgentState(task, run, workspace, workflow, plan, currentItem, changes, commands, List.of(),
                 null, List.of(), List.of(), null, transientData);
+    }
+
+    private AgentState stateWithCommands(Ids ids, PlanView plan, PlanItem currentItem,
+                                         Map<String, Object> transientData, List<FileChange> changes,
+                                         List<com.nask.agent.command.CommandExecution> commands) {
+        return stateWithRequest(ids, plan, currentItem, transientData, changes, "request", commands);
     }
 
     private FileChange fileChange(Ids ids, String path) {

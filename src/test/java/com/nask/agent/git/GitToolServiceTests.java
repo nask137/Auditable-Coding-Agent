@@ -97,6 +97,29 @@ class GitToolServiceTests {
         assertThat(output).contains("+class App { String value() { return \"new\"; } }");
     }
 
+    @Test
+    void gitDiffIgnoresSuccessfulStderrWarningsWhenParsingChangedPaths() throws Exception {
+        assumeTrue(run(null, "git", "--version") == 0);
+        workspaceDir = TestFiles.createTempDirectory("agent-git-tool-");
+        var source = workspaceDir.resolve("src/main/java/cdu/wangnan/App.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "class App { String value() { return \"old\"; } }\n");
+        assertThat(run(workspaceDir, "git", "init")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "user.email", "test@example.com")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "user.name", "Test User")).isZero();
+        assertThat(run(workspaceDir, "git", "add", ".")).isZero();
+        assertThat(run(workspaceDir, "git", "commit", "-m", "init")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "core.safecrlf", "warn")).isZero();
+        assertThat(run(workspaceDir, "git", "config", "core.autocrlf", "true")).isZero();
+
+        Files.writeString(source, "class App { String value() { return \"new\"; } }\r\n");
+
+        var result = service().diff(context(workspaceDir, List.of()), ".");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.payload().get("includedFiles")).isEqualTo(List.of("src/main/java/cdu/wangnan/App.java"));
+    }
+
     private GitToolService service() {
         var toolRecords = mock(ToolRecordRepository.class);
         when(toolRecords.insertCall(any(), anyString(), any(), anyString(), any()))

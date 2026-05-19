@@ -89,7 +89,9 @@ public class LlmPromptFactory {
                 }
 
                 The action type must be exactly one of:
-                LIST_FILES, READ_FILE, SEARCH_TEXT, CREATE_DIRECTORY, CREATE_FILE, APPLY_PATCH, GIT_STATUS, GIT_DIFF.
+                LIST_FILES, READ_FILE, SEARCH_TEXT, CREATE_DIRECTORY, CREATE_FILE, APPLY_PATCH,
+                GIT_STATUS, GIT_DIFF, GIT_ADD, GIT_COMMIT, GIT_PUSH, GIT_PULL, GIT_FETCH,
+                GIT_LOG, GIT_SHOW, GIT_BRANCH, GIT_CHECKOUT, RUN_COMMAND.
 
                 Required input object by action type:
                 LIST_FILES: {"path": ".", "maxDepth": 4}
@@ -100,6 +102,16 @@ public class LlmPromptFactory {
                 APPLY_PATCH: {"path": "relative/path", "oldText": "exact existing text", "newText": "replacement text, may be empty"}
                 GIT_STATUS: {"workingDirectory": "."}
                 GIT_DIFF: {"workingDirectory": "."}
+                GIT_ADD: {"workingDirectory": ".", "paths": ["relative/path"]}
+                GIT_COMMIT: {"workingDirectory": ".", "message": "concise commit message"}
+                GIT_PUSH: {"workingDirectory": ".", "remote": "origin", "branch": "current-branch-or-empty"}
+                GIT_PULL: {"workingDirectory": ".", "remote": "origin", "branch": "current-branch-or-empty"}
+                GIT_FETCH: {"workingDirectory": ".", "remote": "origin"}
+                GIT_LOG: {"workingDirectory": ".", "maxCount": 5}
+                GIT_SHOW: {"workingDirectory": ".", "revision": "HEAD"}
+                GIT_BRANCH: {"workingDirectory": "."}
+                GIT_CHECKOUT: {"workingDirectory": ".", "ref": "branch-or-revision"}
+                RUN_COMMAND: {"executable": "mvn", "arguments": ["test"], "workingDirectory": "."}
 
                 Example JSON output for creating directories:
                 {
@@ -134,8 +146,11 @@ public class LlmPromptFactory {
                 Do not use CREATE_FILE to create directories. Use CREATE_DIRECTORY for directory paths.
                 Every CREATE_FILE action must include a non-empty content string.
                 Use READ_FILE before APPLY_PATCH unless recent tool results already include the exact target content.
+                Use RUN_COMMAND for build, test, compile, formatting, code generation, diagnostics, and project scripts.
                 Tool path inputs must be real workspace-relative paths. Never use task-reports paths or absolute
                 filesystem paths from project memory as tool inputs.
+                Command execution is always mediated by Runtime command policy and approval. Do not use shell
+                metacharacters; pass arguments as an array.
 
                 Current plan item:
                 %s
@@ -194,47 +209,6 @@ public class LlmPromptFactory {
                 context.recentToolResults(), context.recoveryNotes(), memorySummary(context.memoryContext())));
     }
 
-    public LlmPrompt validationDecision(ValidationContext context) {
-        return new LlmPrompt("validation-decision-v2", SHARED_SYSTEM, """
-                Return json with this exact shape:
-                {
-                  "shouldValidate": false,
-                  "executableAndArgs": [],
-                  "reason": "why validation should be skipped or which minimal validation is appropriate"
-                }
-                Validation is risk-based, not mandatory. Set shouldValidate to false when no files changed in
-                this run, unless the user explicitly asked to run tests or validation.
-                Set shouldValidate to false for read-only review, search, explanation, planning, git status, or
-                diff-only work.
-                Set shouldValidate to true when source, test, build, configuration, migration, or runtime files
-                were created or modified, or when the task type is TEST.
-                Prefer the narrowest safe command that matches the changed files and project memory. Use the full
-                project test suite only when it is the appropriate minimal validation for the change.
-                The Runtime command policy and approval flow decide whether the command may run.
-
-                Task id: %s
-                Run id: %s
-                Workspace id: %s
-                Task type: %s
-                User request:
-                %s
-
-                Files changed in this run:
-                %s
-
-                Recent commands in this run:
-                %s
-
-                Runtime recovery notes:
-                %s
-
-                Project memory context:
-                %s
-                """.formatted(context.taskId(), context.runId(), context.workspaceId(), context.taskType(),
-                context.userRequest(), context.changedFiles(), context.recentCommands(), context.recoveryNotes(),
-                memorySummary(context.memoryContext())));
-    }
-
     public LlmPrompt finalReport(ReportContext context) {
         return new LlmPrompt("final-report-v1", SHARED_SYSTEM, """
                 Return json with this exact shape:
@@ -263,11 +237,14 @@ public class LlmPromptFactory {
                 Changed files:
                 %s
 
+                Git working tree status:
+                %s
+
                 Previous prompts in this conversation, newest first:
                 %s
                 """.formatted(context.taskSummary(), context.resultSummary(), context.workflowSummaries(),
                 context.recentToolObservations(), context.projectContext(), context.changedFiles(),
-                context.previousConversationPrompts()));
+                context.gitStatusLines(), context.previousConversationPrompts()));
     }
 
     private String memorySummary(com.nask.agent.memory.MemoryContext context) {

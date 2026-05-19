@@ -56,6 +56,21 @@ class WorkspaceIgnoreServiceTests {
     }
 
     @Test
+    void recomputesIgnoredPathsAfterGitignoreChanges() throws Exception {
+        requireGit();
+        runGit("init");
+        Files.writeString(workspaceRoot.resolve(".gitignore"), "");
+        Files.createDirectories(workspaceRoot.resolve(".idea"));
+        Files.writeString(workspaceRoot.resolve(".idea/workspace.xml"), "workspace");
+
+        assertThat(service.ignoreView(workspace()).ignoredPrefixes()).doesNotContain(".idea/");
+
+        Files.writeString(workspaceRoot.resolve(".gitignore"), ".idea/\n");
+
+        assertThat(service.ignoreView(workspace()).ignoredPrefixes()).contains(".idea/");
+    }
+
+    @Test
     void returnsEmptyViewOutsideGitWorkspace() {
         var view = service.ignoreView(workspace());
 
