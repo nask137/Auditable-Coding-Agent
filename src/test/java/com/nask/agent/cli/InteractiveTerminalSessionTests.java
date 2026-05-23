@@ -82,19 +82,6 @@ class InteractiveTerminalSessionTests {
     }
 
     @Test
-    void routesReviewOnlyPromptsToReviewWorkflow() {
-        assertThat(InteractiveTerminalSession.looksLikeReviewOnly("总结一下项目是干嘛的，有没有明显的bug"))
-                .isTrue();
-        assertThat(InteractiveTerminalSession.looksLikeReviewOnly("说一下项目的特点")).isTrue();
-        assertThat(InteractiveTerminalSession.looksLikeReviewOnly("查看一下项目的readme文件呢")).isTrue();
-        assertThat(InteractiveTerminalSession.looksLikeReviewOnly("为什么之前说这是Flutter项目")).isTrue();
-        assertThat(InteractiveTerminalSession.looksLikeReviewOnly("fix the bug in workspace registration"))
-                .isFalse();
-        assertThat(InteractiveTerminalSession.looksLikeReviewOnly("修复 workspace 注册的问题"))
-                .isFalse();
-    }
-
-    @Test
     void newConversationCreatesBackendConversationForCurrentWorkspace() throws Exception {
         var workspaceId = UUID.randomUUID().toString();
         var conversationId = UUID.randomUUID().toString();
@@ -122,6 +109,17 @@ class InteractiveTerminalSessionTests {
         assertThat(InteractiveTerminalSession.promptTitle("  fix   the failing workspace ignore handling  "))
                 .isEqualTo("fix the failing workspace ignore handling");
         assertThat(InteractiveTerminalSession.promptTitle("x".repeat(100))).hasSize(80);
+    }
+
+    @Test
+    void workflowConfigPreservesExplicitCodingAgent() {
+        assertThat(InteractiveTerminalSession.workflowForPermission("coding-agent", "workspace-write"))
+                .isEqualTo("coding-agent");
+        assertThat(InteractiveTerminalSession.workflowForPermission("coding-agent", "read-only"))
+                .isEqualTo("coding-agent");
+        assertThat(InteractiveTerminalSession.workflowForPermission("auto", "workspace-write")).isNull();
+        assertThat(InteractiveTerminalSession.workflowForPermission("auto", "read-only"))
+                .isEqualTo("review-agent");
     }
 
     private static class FakeAgentCli extends AgentCli {

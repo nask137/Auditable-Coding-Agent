@@ -131,6 +131,7 @@ public final class Domain {
         RecoveryReplanned,
         RecoveryUserInputRequested,
         RecoverySkipped,
+        RecoveryBudgetExhausted,
         RecoveryExhausted,
         UserInputRequested,
         UserInputProvided,
@@ -382,4 +383,3 @@ public final class Domain {
         RUNNING, SUCCESS, FAILURE, BLOCKED, WAITING_APPROVAL, WAITING_USER_INPUT, FINISHED
     }
 }
-

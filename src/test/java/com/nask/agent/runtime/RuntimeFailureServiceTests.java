@@ -36,7 +36,7 @@ class RuntimeFailureServiceTests {
     }
 
     @Test
-    void writesExhaustedEventWhenRecoveryBudgetIsExhausted() {
+    void writesBudgetExhaustedEventWhenRetryBudgetFallsBackToUserInput() {
         when(auditService.append(any())).thenReturn(UUID.randomUUID());
         when(repository.insert(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(recoveryPolicy.decide(any(), any(), any(), any(), any()))
@@ -48,6 +48,7 @@ class RuntimeFailureServiceTests {
         var captor = org.mockito.ArgumentCaptor.forClass(AuditEventDraft.class);
         verify(auditService, org.mockito.Mockito.times(3)).append(captor.capture());
         assertThat(captor.getAllValues().stream().map(AuditEventDraft::eventType))
-                .contains(Domain.AuditEventType.RecoveryExhausted);
+                .contains(Domain.AuditEventType.RecoveryBudgetExhausted)
+                .doesNotContain(Domain.AuditEventType.RecoveryExhausted);
     }
 }

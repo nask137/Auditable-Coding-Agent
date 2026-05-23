@@ -5,6 +5,8 @@ import com.nask.agent.common.ApiException;
 import com.nask.agent.conversation.ConversationService;
 import com.nask.agent.file.FileChangeRepository;
 import com.nask.agent.git.GitToolService;
+import com.nask.agent.llm.LlmGateway;
+import com.nask.agent.llm.ReportContext;
 import com.nask.agent.memory.ProjectMemoryRepository;
 import com.nask.agent.runtime.RuntimeFailureService;
 import com.nask.agent.task.CodingTask;
@@ -31,6 +33,7 @@ public class ReportService {
     private final ConversationService conversationService;
     private final WorkspaceService workspaceService;
     private final GitToolService gitToolService;
+    private final LlmGateway llmGateway;
 
     /**
      * Creates a report service.
@@ -40,7 +43,7 @@ public class ReportService {
                          RuntimeFailureService runtimeFailureService, WorkflowService workflowService,
                          ProjectMemoryRepository projectMemoryRepository, ConversationService conversationService,
                          WorkspaceService workspaceService,
-                         GitToolService gitToolService) {
+                         GitToolService gitToolService, LlmGateway llmGateway) {
         this.repository = repository;
         this.fileChangeRepository = fileChangeRepository;
         this.auditService = auditService;
@@ -50,6 +53,7 @@ public class ReportService {
         this.conversationService = conversationService;
         this.workspaceService = workspaceService;
         this.gitToolService = gitToolService;
+        this.llmGateway = llmGateway;
     }
 
     /**
@@ -76,20 +80,37 @@ public class ReportService {
                 .distinct()
                 .toList();
         var previousPrompts = previousTasks.stream().map(previous -> compact(previous.prompt(), 300)).toList();
-        var content = deterministicSummary(task, resultSummary, workflowSummaries, changedFiles, gitStatus,
-                combinedChangedFiles, previousPrompts)
-                + "\n## Project Context\n\n"
-                + (profile == null ? "- Project profile: not available\n"
-                : "- Project profile: %s; frameworks %s; build tools %s; test tools %s\n"
-                .formatted(profile.languageSummary(), profile.frameworks(), profile.buildTools(),
-                        profile.testTools()))
-                + retrievals.stream().map(retrieval -> "- Retrieval `%s`: %s; query `%s`; sources %s"
+        var projectContext = new java.util.ArrayList<String>();
+        projectContext.add(profile == null ? "Project profile: not available"
+                : "Project profile: %s; frameworks %s; build tools %s; test tools %s"
+                .formatted(profile.languageSummary(), profile.frameworks(), profile.buildTools(), profile.testTools()));
+        retrievals.stream().map(retrieval -> "Retrieval `%s`: %s; query `%s`; sources %s"
                         .formatted(retrieval.id(), retrieval.summary(), retrieval.queryText(),
                                 retrieval.resultRefs().stream().map(this::sourceRef).toList()))
-                .reduce("", (a, b) -> a + b + "\n")
-                + proposals.stream().map(proposal -> "- Memory proposal `%s` `%s`: %s"
+                .forEach(projectContext::add);
+        proposals.stream().map(proposal -> "Memory proposal `%s` `%s`: %s"
                         .formatted(proposal.id(), proposal.status(), proposal.title()))
-                .reduce("", (a, b) -> a + b + "\n")
+                .forEach(projectContext::add);
+        var reportContext = new ReportContext(task.id(), runId, task.userRequest(), resultSummary,
+                workflowSummaries, combinedChangedFiles, gitStatus.statusLines(), previousPrompts,
+                List.of(), projectContext);
+        var narrative = reportNarrative(reportContext);
+        var content = narrative
+                + "\n\n## Runtime Details\n\n"
+                + "- Request: %s\n".formatted(compact(task.userRequest(), 500))
+                + "- Result: %s\n".formatted(compact(resultSummary, 500))
+                + "- Conversation memory: %s\n".formatted(previousPrompts.isEmpty()
+                ? "no previous prompt found in this conversation"
+                : "previous prompt was `%s`".formatted(previousPrompts.getFirst()))
+                + "- Changed files: %s\n".formatted(combinedChangedFiles.isEmpty()
+                ? "none" : String.join(", ", combinedChangedFiles))
+                + "- Agent-recorded changes: %s\n".formatted(changedFiles.isEmpty()
+                ? "none" : String.join(", ", changedFiles))
+                + "- Git status: %s\n".formatted(gitStatus.available()
+                ? (gitStatus.statusLines().isEmpty() ? "clean" : String.join("; ", gitStatus.statusLines()))
+                : "unavailable: " + compact(gitStatus.summary(), 160))
+                + "\n## Project Context\n\n"
+                + projectContext.stream().map(item -> "- " + item).reduce("", (a, b) -> a + b + "\n")
                 + "\n## File Changes\n\n"
                 + changes.stream().map(change -> "- `%s` %s".formatted(change.path(), change.changeType()))
                 .reduce("", (a, b) -> a + b + "\n")
@@ -112,41 +133,18 @@ public class ReportService {
         return repository.insert(new TaskReport(UUID.randomUUID(), task.id(), runId, content, Instant.now()));
     }
 
-    private String deterministicSummary(CodingTask task, String resultSummary, List<String> workflowSummaries,
-                                        List<String> agentChangedFiles,
-                                        GitToolService.GitWorkspaceStatus gitStatus,
-                                        List<String> combinedChangedFiles,
-                                        List<String> previousPrompts) {
-        return """
-                # Agent Run Report
+    private String reportNarrative(ReportContext context) {
+        try {
+            return llmGateway.generateReport(context).markdown().strip();
+        } catch (RuntimeException e) {
+            return """
+                    # Result
 
-                ## Summary
+                    %s
 
-                - Request: %s
-                - Result: %s
-                - Conversation memory: %s
-                - Changed files: %s
-                - Agent-recorded changes: %s
-                - Git status: %s
-
-                ## Key Outputs
-
-                %s
-
-                """.formatted(compact(task.userRequest(), 500), compact(resultSummary, 500),
-                previousPrompts.isEmpty()
-                        ? "no previous prompt found in this conversation"
-                        : "previous prompt was `%s`".formatted(previousPrompts.getFirst()),
-                combinedChangedFiles.isEmpty() ? "none" : String.join(", ", combinedChangedFiles),
-                agentChangedFiles.isEmpty() ? "none" : String.join(", ", agentChangedFiles),
-                gitStatus.available()
-                        ? (gitStatus.statusLines().isEmpty() ? "clean" : String.join("; ", gitStatus.statusLines()))
-                        : "unavailable: " + compact(gitStatus.summary(), 160),
-                workflowSummaries.isEmpty()
-                        ? "- No workflow output summaries were recorded."
-                        : workflowSummaries.stream().limit(8)
-                        .map(summary -> "- " + summary)
-                        .reduce("", (a, b) -> a + b + "\n").strip());
+                    Report narration could not be generated by the model. Runtime details are preserved below.
+                    """.formatted(compact(context.resultSummary(), 500)).strip();
+        }
     }
 
     private String gitStatusSection(GitToolService.GitWorkspaceStatus gitStatus) {

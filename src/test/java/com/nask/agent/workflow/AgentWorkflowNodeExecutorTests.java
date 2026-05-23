@@ -11,6 +11,7 @@ import com.nask.agent.file.FileToolService;
 import com.nask.agent.file.FileChange;
 import com.nask.agent.git.GitToolService;
 import com.nask.agent.llm.AgentDecision;
+import com.nask.agent.llm.ExecutionContext;
 import com.nask.agent.llm.LlmGateway;
 import com.nask.agent.llm.LlmGatewayException;
 import com.nask.agent.llm.PlanDraft;
@@ -318,9 +319,47 @@ class AgentWorkflowNodeExecutorTests {
                 new MapWorkflowNode("execute_plan_item", Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION.name(), Map.of()));
 
         assertThat(result.status()).isEqualTo("SUCCESS");
-        verify(llmGateway, times(2)).decideNextAction(any());
+        var captor = org.mockito.ArgumentCaptor.forClass(ExecutionContext.class);
+        verify(llmGateway, times(2)).decideNextAction(captor.capture());
+        assertThat(captor.getAllValues().get(1).recoveryNotes())
+                .anySatisfy(note -> assertThat(note)
+                        .contains("Previous model decision was rejected")
+                        .contains("at most 5 actions")
+                        .contains("empty actions array"));
         verify(runtimeFailureService).record(eq(ids.taskId()), eq(ids.runId()), eq(step.id()), eq(item.id()),
                 eq(Domain.RuntimeFailureType.MODEL_OUTPUT_PARSE_FAILED), any(), eq("decide next action"));
+        verify(planService).updateItemStatus(item.id(), Domain.PlanItemStatus.COMPLETED);
+    }
+
+    @Test
+    void summarizesEveryActionInCompletedPlanItemStep() {
+        var ids = ids();
+        var item = planItem(ids.planId(), "Inspect project files");
+        var state = state(ids, new PlanView(plan(ids), List.of(item)), item, Map.of());
+        var step = step(ids.runId(), item.id(), Domain.StepType.EXECUTE_PLAN_ITEM);
+        var action = action(step.id());
+        when(stepService.start(ids.taskId(), ids.runId(), item.id(), Domain.StepType.EXECUTE_PLAN_ITEM,
+                item.description())).thenReturn(step);
+        when(actionService.create(eq(step.id()), eq(Domain.ActionType.CALL_TOOL), any(), eq(Domain.RiskLevel.MEDIUM)))
+                .thenReturn(action);
+        when(llmGateway.decideNextAction(any())).thenReturn(new AgentDecision(item.id(), List.of(
+                new AgentDecision.Action("READ_FILE", "Read README", Map.of("path", "README.md")),
+                new AgentDecision.Action("READ_FILE", "Read pom", Map.of("path", "pom.xml")))));
+        when(fileToolService.readFile(any(), eq("README.md")))
+                .thenReturn(ToolExecutionResult.success("Read README.md", Map.of()));
+        when(fileToolService.readFile(any(), eq("pom.xml")))
+                .thenReturn(ToolExecutionResult.success("Read pom.xml", Map.of()));
+
+        var result = executor.execute(state,
+                new MapWorkflowNode("execute_plan_item", Domain.WorkflowNodeType.PLAN_ITEM_EXECUTION.name(), Map.of()));
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.summary()).contains("Completed 2 actions")
+                .contains("READ_FILE: Read README.md")
+                .contains("READ_FILE: Read pom.xml");
+        verify(stepService).complete(eq(ids.taskId()), eq(ids.runId()), eq(step),
+                org.mockito.ArgumentMatchers.argThat(summary -> summary.contains("Read README.md")
+                        && summary.contains("Read pom.xml")));
         verify(planService).updateItemStatus(item.id(), Domain.PlanItemStatus.COMPLETED);
     }
 

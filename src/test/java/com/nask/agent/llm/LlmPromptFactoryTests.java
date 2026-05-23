@@ -16,6 +16,24 @@ class LlmPromptFactoryTests {
     private final LlmPromptFactory prompts = new LlmPromptFactory();
 
     @Test
+    void agentWorkflowSelectionPromptDefinesSelectorRoleAndAgents() {
+        var prompt = prompts.agentWorkflowSelection(new TaskContext(UUID.randomUUID(), UUID.randomUUID(),
+                null, UUID.randomUUID(), "检查README是否最新版", List.of()));
+
+        assertThat(prompt.version()).isEqualTo("agent-workflow-selection-v1");
+        assertThat(prompt.system())
+                .contains("agent type selector")
+                .contains("choose exactly one agent/workflow");
+        assertThat(prompt.user())
+                .contains("\"agent\": \"coding-agent|review-agent|test-agent\"")
+                .contains("coding-agent: Use for tasks that may create or modify files")
+                .contains("review-agent: Use for read-only inspection")
+                .contains("test-agent: Use for validation-only tasks")
+                .contains("agent and workflow must be identical")
+                .contains("检查README是否最新版");
+    }
+
+    @Test
     void includesRecoveryNotesInEarlyModelPrompts() {
         var note = "User answered recovery prompt `Runtime recovery needs guidance`: read README.md first";
         var understanding = new TaskUnderstanding("Create note", "CODE_EDIT", List.of(), List.of());
@@ -40,13 +58,15 @@ class LlmPromptFactoryTests {
 
         assertThat(prompt.user())
                 .contains("Example JSON output for creating directories")
+                .contains("actions array must contain no more than 5 actions")
                 .contains("\"type\": \"CREATE_DIRECTORY\"")
                 .contains("\"path\": \"src/main/java\"")
                 .contains("Example JSON output for creating a file")
                 .contains("\"type\": \"CREATE_FILE\"")
                 .contains("\"content\":")
                 .contains("Every CREATE_FILE action must include a non-empty content string")
-                .contains("Do not use CREATE_FILE to create directories");
+                .contains("Do not use CREATE_FILE to create directories")
+                .contains("reject outputs with more than 5 actions");
     }
 
     @Test

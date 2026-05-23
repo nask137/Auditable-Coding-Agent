@@ -35,6 +35,7 @@ import com.nask.agent.validation.ValidationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -269,6 +270,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
         }
         var decision = decisionResult.decision();
         ToolExecutionResult last = ToolExecutionResult.success("No action required", Map.of());
+        var actionSummaries = new ArrayList<String>();
         for (var actionDraft : decision.actions()) {
             var action = actionService.create(step.id(), Domain.ActionType.CALL_TOOL, actionDraft.reason(),
                     Domain.RiskLevel.MEDIUM);
@@ -278,6 +280,7 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                     ? executeAction(context, actionDraft.type(), actionDraft.input(), actionDraft.reason())
                     : ToolExecutionResult.blocked("Review workflow is read-only; action not allowed: "
                     + actionDraft.type());
+            actionSummaries.add(actionDraft.type() + ": " + last.summary());
             if (last.waitingApproval()) {
                 stepService.markWaitingApproval(state.task().id(), state.execution().id(), step, last.summary());
                 return NodeExecutionResult.waitingApproval(last.summary(), Map.of("stepId", step.id().toString()));
@@ -321,11 +324,13 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
                         failure.failureType(), failure.strategy(), state.plan().plan().id(), item.id());
             }
         }
-        stepService.complete(state.task().id(), state.execution().id(), step, last.summary());
+        var stepSummary = summarizeActionResults(actionSummaries, last.summary());
+        stepService.complete(state.task().id(), state.execution().id(), step, stepSummary);
         planService.updateItemStatus(item.id(), Domain.PlanItemStatus.COMPLETED);
-        return NodeExecutionResult.success(last.summary(), Map.of(
+        return NodeExecutionResult.success(stepSummary, Map.of(
                 "stepId", step.id().toString(),
-                "planItemId", item.id().toString()));
+                "planItemId", item.id().toString(),
+                "actionSummaries", actionSummaries));
     }
 
     private NodeExecutionResult resumeApprovedCommandIfPresent(AgentState state) {
@@ -554,16 +559,18 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
 
     private AgentDecisionResult decideNextActionWithRecovery(AgentState state, com.nask.agent.plan.PlanView plan,
                                                              PlanItem item, List<String> observedFiles, UUID stepId) {
+        var recoveryNotes = new ArrayList<>(state.recoveryNotes());
         while (true) {
             try {
                 var decision = llmGateway.decideNextAction(new ExecutionContext(state.task().id(), state.execution().id(), stepId,
                         item, observedFiles, toolRecordRepository.findRecentSummariesByRun(state.execution().id(), 8),
-                        state.recoveryNotes(), state.memoryContext()));
+                        recoveryNotes, state.memoryContext()));
                 return new AgentDecisionResult(decision, null);
             } catch (LlmGatewayException e) {
                 var failure = runtimeFailureService.record(state.task().id(), state.execution().id(), stepId, item.id(),
                         failureClassifier.fromModelException(e), e.getMessage(), "decide next action");
                 if (Domain.RecoveryStrategy.RETRY_SAME_ACTION.name().equals(failure.strategy())) {
+                    recoveryNotes.add(modelDecisionCorrectionNote(e.getMessage()));
                     continue;
                 }
                 if (Domain.RecoveryStrategy.REPLAN_CURRENT_ITEM.name().equals(failure.strategy())) {
@@ -587,6 +594,23 @@ public class AgentWorkflowNodeExecutor implements WorkflowNodeExecutor {
     }
 
     private record AgentDecisionResult(com.nask.agent.llm.AgentDecision decision, NodeExecutionResult result) {
+    }
+
+    private String summarizeActionResults(List<String> actionSummaries, String fallbackSummary) {
+        if (actionSummaries.isEmpty()) {
+            return fallbackSummary;
+        }
+        if (actionSummaries.size() == 1) {
+            return actionSummaries.getFirst();
+        }
+        return "Completed " + actionSummaries.size() + " actions: "
+                + String.join("; ", actionSummaries);
+    }
+
+    private String modelDecisionCorrectionNote(String failureSummary) {
+        return "Previous model decision was rejected: " + compact(failureSummary, 240)
+                + ". Return valid JSON with at most 5 actions. If recent tool results already satisfy the plan item, "
+                + "return an empty actions array.";
     }
 
     private NodeExecutionResult replanCurrentItem(AgentState state, com.nask.agent.plan.PlanView plan, PlanItem item,

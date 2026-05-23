@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -19,7 +18,6 @@ import java.util.Map;
  * OpenAI-compatible DeepSeek chat-completions client using JSON output mode.
  */
 @Component
-@ConditionalOnProperty(name = "agent.llm.provider", havingValue = "http")
 public class DeepSeekChatCompletionClient implements ChatCompletionClient {
     private final LlmSettings settings;
     private final ObjectMapper objectMapper;
@@ -37,7 +35,7 @@ public class DeepSeekChatCompletionClient implements ChatCompletionClient {
     @Override
     public ChatCompletionResult complete(LlmPrompt prompt) {
         if (settings.apiKey().isBlank()) {
-            throw new LlmGatewayException("agent.llm.api-key must be configured when agent.llm.provider=http");
+            throw new LlmGatewayException("agent.llm.api-key must be configured");
         }
         try {
             var body = objectMapper.writeValueAsString(new ChatRequest(

@@ -11,7 +11,7 @@ public record CliRuntimeSettings(
         String model,
         String profile) {
     public static CliRuntimeSettings defaults() {
-        return new CliRuntimeSettings("http://localhost:8080", "", "coding-agent",
+        return new CliRuntimeSettings("http://localhost:8080", "", "auto",
                 "workspace-write", "", "default");
     }
 }

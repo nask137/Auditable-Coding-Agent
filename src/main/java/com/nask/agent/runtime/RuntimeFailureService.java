@@ -65,9 +65,15 @@ public class RuntimeFailureService {
                     "budgetRemaining", decision.budgetRemaining())));
         }
         if (decision.budgetExhausted()) {
+            var eventType = Domain.RecoveryStrategy.ASK_USER.equals(decision.strategy())
+                    ? Domain.AuditEventType.RecoveryBudgetExhausted
+                    : Domain.AuditEventType.RecoveryExhausted;
+            var outputSummary = Domain.RecoveryStrategy.ASK_USER.equals(decision.strategy())
+                    ? "Recovery budget exhausted; asking user"
+                    : decision.strategy().name();
             auditService.append(new AuditEventDraft(taskId, runId, stepId, null,
-                    Domain.AuditEventType.RecoveryExhausted, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
-                    type.name(), decision.strategy().name(), List.of(), null, null, null, null, null,
+                    eventType, Domain.AuditActor.RUNTIME, Domain.AuditLevel.WARN,
+                    type.name(), outputSummary, List.of(), null, null, null, null, null,
                     Domain.RiskLevel.MEDIUM, null, decision.recoverable(), null, null, Map.of(
                     "failureId", failure.id().toString(),
                     "strategy", decision.strategy().name(),

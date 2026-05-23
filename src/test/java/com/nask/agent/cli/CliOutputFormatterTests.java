@@ -39,17 +39,20 @@ class CliOutputFormatterTests {
     }
 
     @Test
-    void reportKeepsNarrativeAndOmitsDetailedSections() throws Exception {
+    void reportKeepsNarrativeAndOmitsRuntimeDetails() throws Exception {
         var report = mapper.readTree("""
                 {
-                  "contentMd": "## Summary\\n\\nThis project is a Spring Boot backend.\\n\\n## Workflow\\n\\n- noisy\\n\\n## Audit Events\\n\\n- noisy"
+                  "contentMd": "# Result\\n\\nREADME.md is current.\\n\\n## Runtime Details\\n\\n- Changed files: README.md\\n\\n## Workflow\\n\\n- noisy\\n\\n## Audit Events\\n\\n- noisy"
                 }
                 """);
 
         var output = new CliOutputFormatter(mapper, false).report(report);
 
-        assertThat(output).contains("Spring Boot backend");
-        assertThat(output).doesNotContain("## Workflow").doesNotContain("## Audit Events");
+        assertThat(output).contains("README.md is current.");
+        assertThat(output)
+                .doesNotContain("Changed files")
+                .doesNotContain("## Workflow")
+                .doesNotContain("## Audit Events");
         assertThat(output).contains("Details:");
     }
 
@@ -64,7 +67,7 @@ class CliOutputFormatterTests {
                     "promptIndex": 2
                   },
                   "run": {"id": "9840ba7f-e2e0-49f5-881b-b63a994459ca", "status": "COMPLETED"},
-                  "report": {"contentMd": "## Summary\\n\\n- Conversation memory: previous prompt was `agent list`"},
+                  "report": {"contentMd": "# Result\\n\\nREADME.md is current.\\n\\n## Runtime Details\\n\\n- Conversation memory: previous prompt was `agent list`"},
                   "changes": [],
                   "failures": []
                 }
@@ -74,7 +77,8 @@ class CliOutputFormatterTests {
 
         assertThat(output)
                 .contains("Conversation 11111111; prompt #2")
-                .contains("previous prompt was `agent list`");
+                .contains("README.md is current.")
+                .doesNotContain("previous prompt was `agent list`");
     }
 
     @Test
@@ -92,4 +96,3 @@ class CliOutputFormatterTests {
         assertThat(output).contains("TaskCreated").contains("2").contains("Total events: 3");
     }
 }
-

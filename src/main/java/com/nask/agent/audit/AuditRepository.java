@@ -78,7 +78,7 @@ public class AuditRepository {
      * Lists audit events for a task in chronological order.
      */
     public List<AuditEvent> findByTask(UUID taskId) {
-        return jdbc.query("select * from audit_event where task_id = :taskId order by occurred_at, id",
+        return jdbc.query("select * from audit_event where task_id = :taskId order by event_sequence",
                 new MapSqlParameterSource("taskId", taskId), mapper());
     }
 
@@ -86,7 +86,7 @@ public class AuditRepository {
      * Lists audit events for a run in chronological order.
      */
     public List<AuditEvent> findByRun(UUID runId) {
-        return jdbc.query("select * from audit_event where run_id = :runId order by occurred_at, id",
+        return jdbc.query("select * from audit_event where run_id = :runId order by event_sequence",
                 new MapSqlParameterSource("runId", runId), mapper());
     }
 

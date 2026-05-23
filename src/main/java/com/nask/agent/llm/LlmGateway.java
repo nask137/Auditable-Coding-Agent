@@ -5,6 +5,11 @@ package com.nask.agent.llm;
  */
 public interface LlmGateway {
     /**
+     * Selects the agent workflow that should handle the user's task.
+     */
+    AgentWorkflowSelection selectAgentWorkflow(TaskContext context);
+
+    /**
      * Produces a structured understanding of the user's task.
      */
     TaskUnderstanding understandTask(TaskContext context);

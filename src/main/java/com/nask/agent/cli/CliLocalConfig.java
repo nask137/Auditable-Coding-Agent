@@ -61,7 +61,7 @@ class CliLocalConfig {
 
     private void defaults() {
         values.putIfAbsent("base_url", "http://localhost:8080");
-        values.putIfAbsent("workflow", "coding-agent");
+        values.putIfAbsent("workflow", "auto");
         values.putIfAbsent("permission_preset", "workspace-write");
         values.putIfAbsent("model", "");
         values.putIfAbsent("profile", "default");

@@ -4,7 +4,6 @@ import com.nask.agent.plan.PlanService;
 import com.nask.agent.plan.PlanView;
 import com.nask.agent.step.AgentStep;
 import com.nask.agent.step.AgentStepService;
-import com.nask.agent.common.TaskIntentClassifier;
 import com.nask.agent.workflow.WorkflowService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,13 +30,15 @@ public class TaskController {
     private final TaskTimelineService timelineService;
     private final PlanService planService;
     private final AgentStepService stepService;
+    private final TaskWorkflowSelector workflowSelector;
 
     /**
      * Creates a task controller with task orchestration services.
      */
     public TaskController(TaskService taskService, TaskExecutionExecutor executionExecutor,
                           TaskExecutionAsyncExecutor asyncExecutor, WorkflowService workflowService,
-                          TaskTimelineService timelineService, PlanService planService, AgentStepService stepService) {
+                          TaskTimelineService timelineService, PlanService planService, AgentStepService stepService,
+                          TaskWorkflowSelector workflowSelector) {
         this.taskService = taskService;
         this.executionExecutor = executionExecutor;
         this.asyncExecutor = asyncExecutor;
@@ -45,6 +46,7 @@ public class TaskController {
         this.timelineService = timelineService;
         this.planService = planService;
         this.stepService = stepService;
+        this.workflowSelector = workflowSelector;
     }
 
     /**
@@ -78,7 +80,7 @@ public class TaskController {
     CodingTask start(@PathVariable UUID taskId,
                    @RequestParam(name = "workflow", required = false) String workflow) {
         var task = taskService.getRequired(taskId);
-        var selectedWorkflow = TaskIntentClassifier.defaultWorkflowFor(workflow, task.userRequest());
+        var selectedWorkflow = workflowSelector.selectWorkflow(task, workflow);
         var workflowDefinition = workflowService.requireEnabledByName(selectedWorkflow);
         taskService.startExecution(task, workflowDefinition.name());
         // Phase 1 executes inline so API clients can immediately observe the final
@@ -94,7 +96,7 @@ public class TaskController {
     CodingTask startAsync(@PathVariable UUID taskId,
                         @RequestParam(name = "workflow", required = false) String workflow) {
         var task = taskService.getRequired(taskId);
-        var selectedWorkflow = TaskIntentClassifier.defaultWorkflowFor(workflow, task.userRequest());
+        var selectedWorkflow = workflowSelector.selectWorkflow(task, workflow);
         var workflowDefinition = workflowService.requireEnabledByName(selectedWorkflow);
         taskService.startExecution(task, workflowDefinition.name());
         asyncExecutor.submit(task.id());

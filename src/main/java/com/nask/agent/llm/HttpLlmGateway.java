@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nask.agent.audit.AuditEventDraft;
 import com.nask.agent.audit.AuditService;
 import com.nask.agent.common.Domain;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -21,7 +20,6 @@ import java.util.UUID;
  * Real model gateway backed by an OpenAI-compatible HTTP chat-completions API.
  */
 @Component
-@ConditionalOnProperty(name = "agent.llm.provider", havingValue = "http")
 public class HttpLlmGateway implements LlmGateway {
     private final LlmPromptFactory promptFactory;
     private final ChatCompletionClient client;
@@ -39,6 +37,12 @@ public class HttpLlmGateway implements LlmGateway {
         this.objectMapper = objectMapper;
         this.outputValidator = outputValidator;
         this.auditService = auditService;
+    }
+
+    @Override
+    public AgentWorkflowSelection selectAgentWorkflow(TaskContext context) {
+        return invoke(context.taskId(), context.runId(), context.stepId(), "select agent workflow",
+                promptFactory.agentWorkflowSelection(context), AgentWorkflowSelection.class);
     }
 
     @Override
