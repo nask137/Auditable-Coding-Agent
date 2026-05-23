@@ -98,7 +98,11 @@ public class TaskService {
             throw new ApiException(HttpStatus.CONFLICT, "TASK_ALREADY_EXECUTED",
                     "Task can only be started once: " + task.id());
         }
-        var workflow = workflowName == null || workflowName.isBlank() ? "coding-agent" : workflowName;
+        if (workflowName == null || workflowName.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "WORKFLOW_REQUIRED",
+                    "Task execution requires an explicit or model-selected workflow");
+        }
+        var workflow = workflowName;
         var mode = switch (workflow) {
             case "review-agent" -> "REVIEW";
             case "test-agent" -> "TEST";
@@ -182,4 +186,3 @@ public class TaskService {
         return text.length() <= 60 ? text : text.substring(0, 57) + "...";
     }
 }
-

@@ -7,11 +7,10 @@ import java.net.URI;
 import java.time.Duration;
 
 /**
- * Configuration for the model provider used behind {@link LlmGateway}.
+ * Configuration for the model API used behind {@link LlmGateway}.
  */
 @Component
 public class LlmSettings {
-    private final String provider;
     private final URI baseUrl;
     private final String apiKey;
     private final String model;
@@ -25,7 +24,6 @@ public class LlmSettings {
      * Creates immutable model settings from application properties.
      */
     public LlmSettings(
-            @Value("${agent.llm.provider:stub}") String provider,
             @Value("${agent.llm.base-url:https://api.deepseek.com}") String baseUrl,
             @Value("${agent.llm.api-key:}") String apiKey,
             @Value("${agent.llm.model:deepseek-v4-pro}") String model,
@@ -34,7 +32,6 @@ public class LlmSettings {
             @Value("${agent.llm.temperature:0.1}") double temperature,
             @Value("${agent.llm.thinking.enabled:true}") boolean thinkingEnabled,
             @Value("${agent.llm.reasoning-effort:high}") String reasoningEffort) {
-        this.provider = provider;
         this.baseUrl = URI.create(baseUrl);
         this.apiKey = apiKey;
         this.model = model;
@@ -43,10 +40,6 @@ public class LlmSettings {
         this.temperature = temperature;
         this.thinkingEnabled = thinkingEnabled;
         this.reasoningEffort = reasoningEffort;
-    }
-
-    public String provider() {
-        return provider;
     }
 
     public URI baseUrl() {

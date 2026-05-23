@@ -2,7 +2,6 @@ package com.nask.agent.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.nask.agent.common.TaskIntentClassifier;
 import picocli.CommandLine;
 
 import java.net.URI;
@@ -216,7 +215,7 @@ public class AgentCli implements Callable<Integer> {
         @CommandLine.Spec CommandLine.Model.CommandSpec spec;
         @CommandLine.Parameters(index = "0") String task;
         @CommandLine.Option(names = "--workspace", required = true) String workspaceId;
-        @CommandLine.Option(names = "--workflow", defaultValue = "coding-agent") String workflow;
+        @CommandLine.Option(names = "--workflow") String workflow;
 
         /**
          * Creates the task, then starts it through the HTTP API.
@@ -226,8 +225,11 @@ public class AgentCli implements Callable<Integer> {
             var root = (AgentCli) spec.root().userObject();
             var created = root.post("/api/tasks", Map.of("workspaceId", workspaceId, "title", "CLI task", "userRequest", task));
             var id = root.mapper.readTree(created).get("id").asText();
-            var selectedWorkflow = TaskIntentClassifier.defaultWorkflowFor(workflow, task);
-            System.out.println(root.format(root.post("/api/tasks/" + id + "/start?workflow=" + selectedWorkflow, null)));
+            var startPath = "/api/tasks/" + id + "/start";
+            if (workflow != null && !workflow.isBlank()) {
+                startPath += "?workflow=" + workflow;
+            }
+            System.out.println(root.format(root.post(startPath, null)));
             return 0;
         }
     }

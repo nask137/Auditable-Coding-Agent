@@ -2,7 +2,6 @@ package com.nask.agent.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.nask.agent.common.TaskIntentClassifier;
 
 import java.nio.charset.Charset;
 import java.nio.file.Path;
@@ -150,7 +149,7 @@ class InteractiveTerminalSession {
 
     private void submitPrompt(String prompt) throws Exception {
         var workspaceId = ensureWorkspace();
-        var workflow = workflowForPromptAndPermission(config.get("workflow"), prompt);
+        var workflow = workflowForPermission(config.get("workflow"));
         var request = new java.util.LinkedHashMap<String, Object>();
         request.put("workspaceId", workspaceId);
         if (conversationId != null && !conversationId.isBlank()) {
@@ -167,7 +166,11 @@ class InteractiveTerminalSession {
             conversationTitle = promptTitle(prompt);
         }
         taskId = created.path("id").asText();
-        var started = mapper.readTree(cli.post("/api/tasks/" + taskId + "/start-async?workflow=" + workflow, null));
+        var startPath = "/api/tasks/" + taskId + "/start-async";
+        if (workflow != null && !workflow.isBlank()) {
+            startPath += "?workflow=" + workflow;
+        }
+        var started = mapper.readTree(cli.post(startPath, null));
         renderedEvents = 0;
         config.save();
         pollUntilBlockedOrDone();
@@ -573,48 +576,16 @@ class InteractiveTerminalSession {
         return path.toAbsolutePath().normalize();
     }
 
-    private String workflowForPromptAndPermission(String configured, String prompt) {
-        var preset = config.get("permission_preset");
-        if ("read-only".equals(preset) && !"test-agent".equals(configured)) {
-            return "review-agent";
-        }
-        var workflow = configured == null || configured.isBlank() ? "coding-agent" : configured;
-        if ("coding-agent".equals(workflow) && looksLikeReviewOnly(prompt)) {
-            return "review-agent";
-        }
-        return TaskIntentClassifier.defaultWorkflowFor(workflow, prompt);
+    String workflowForPermission(String configured) {
+        return workflowForPermission(configured, config.get("permission_preset"));
     }
 
-    static boolean looksLikeReviewOnly(String prompt) {
-        if (prompt == null || prompt.isBlank()) {
-            return false;
+    static String workflowForPermission(String configured, String preset) {
+        if ("read-only".equals(preset)
+                && (configured == null || configured.isBlank() || "auto".equals(configured))) {
+            return "review-agent";
         }
-        var text = prompt.toLowerCase(java.util.Locale.ROOT);
-        if (text.contains("fix") || text.contains("修复") || text.contains("修改") || text.contains("实现")
-                || text.contains("add ") || text.contains("新增")) {
-            return false;
-        }
-        return text.contains("review")
-                || text.contains("summarize")
-                || text.contains("summary")
-                || text.contains("bug")
-                || text.contains("explain")
-                || text.contains("describe")
-                || text.contains("总结")
-                || text.contains("查看")
-                || text.contains("看一下")
-                || text.contains("说一下")
-                || text.contains("介绍")
-                || text.contains("特点")
-                || text.contains("是什么")
-                || text.contains("解释")
-                || text.contains("为什么")
-                || text.contains("原因")
-                || text.contains("明显的问题")
-                || text.contains("明显bug")
-                || text.contains("明显的bug")
-                || text.contains("审查")
-                || text.contains("检查问题");
+        return configured == null || configured.isBlank() || "auto".equals(configured) ? null : configured;
     }
 
     static String promptTitle(String prompt) {

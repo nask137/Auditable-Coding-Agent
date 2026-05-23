@@ -15,6 +15,49 @@ public class LlmPromptFactory {
             Prefer small, reversible actions and avoid unrelated refactors.
             """;
 
+    public LlmPrompt agentWorkflowSelection(TaskContext context) {
+        return new LlmPrompt("agent-workflow-selection-v1", """
+                You are an agent type selector for an auditable local coding agent runtime.
+                You must output only valid json. Do not include markdown fences.
+                Your only job is to choose exactly one agent/workflow for the user's next task.
+                You do not plan implementation steps and you do not execute tools.
+                """, """
+                Return json with this exact shape:
+                {
+                  "agent": "coding-agent|review-agent|test-agent",
+                  "workflow": "coding-agent|review-agent|test-agent",
+                  "rationale": "brief reason for the selection"
+                }
+
+                Available agents:
+                - coding-agent: Use for tasks that may create or modify files, fix bugs, implement features,
+                  refactor code, update documentation, or otherwise change the workspace. It may read,
+                  plan, edit, and validate through the audited Runtime.
+                - review-agent: Use for read-only inspection, explanation, summarization, code review,
+                  architecture analysis, README freshness checks, and questions where the user asks for
+                  findings or guidance without requesting changes. It must not require file changes.
+                - test-agent: Use for validation-only tasks such as running tests, compiling, checking build
+                  health, or reporting test results. It should not modify source files.
+
+                Selection rules:
+                - Choose coding-agent only when the prompt asks for a change or the task cannot be completed
+                  correctly without changing workspace files.
+                - Choose review-agent when the prompt asks to inspect, explain, compare, audit, or report.
+                - Choose test-agent when the prompt asks only to run or verify tests/builds.
+                - If a prompt is ambiguous, choose the least-privileged agent that can satisfy the request.
+                - agent and workflow must be identical and must be one of the three names above.
+
+                User request:
+                %s
+
+                Previous tasks in this conversation. Use these only for lightweight orientation. If the user
+                explicitly refers to prior output using words like above, previous, last, 上述, 上面, 之前, or 建议,
+                use the prior report to resolve the reference. Otherwise, do not treat earlier task goals or
+                assumptions as current requirements:
+                %s
+                """.formatted(context.userRequest(), conversationHistory(context)));
+    }
+
     public LlmPrompt taskUnderstanding(TaskContext context) {
         return new LlmPrompt("task-understanding-v1", SHARED_SYSTEM, """
                 Return json with this exact shape:
@@ -87,6 +130,8 @@ public class LlmPromptFactory {
                     }
                   ]
                 }
+                The actions array must contain no more than 5 actions. Prefer fewer actions; return an empty
+                actions array when the current plan item can be completed from recent tool results or project context.
 
                 The action type must be exactly one of:
                 LIST_FILES, READ_FILE, SEARCH_TEXT, CREATE_DIRECTORY, CREATE_FILE, APPLY_PATCH,
@@ -142,7 +187,8 @@ public class LlmPromptFactory {
                   ]
                 }
 
-                Return an empty actions array if no action is needed. The Runtime will reject unsupported types.
+                Return an empty actions array if no action is needed. The Runtime will reject unsupported types
+                and will reject outputs with more than 5 actions.
                 Do not use CREATE_FILE to create directories. Use CREATE_DIRECTORY for directory paths.
                 Every CREATE_FILE action must include a non-empty content string.
                 Use READ_FILE before APPLY_PATCH unless recent tool results already include the exact target content.
@@ -213,11 +259,13 @@ public class LlmPromptFactory {
         return new LlmPrompt("final-report-v1", SHARED_SYSTEM, """
                 Return json with this exact shape:
                 {
-                  "markdown": "# Agent Run Report\\n\\n..."
+                  "markdown": "# Result\\n\\n..."
                 }
-                Keep the report concise. Do not invent tool results.
-                Summarize the actual outcome for the terminal user. If the user asked about earlier context,
-                answer from the previous conversation prompts below.
+                Write for the terminal user, not for an audit log. Give the direct answer or conclusion first.
+                Use the workflow summaries, project context, changed files, and git status as evidence, but do not
+                dump raw file lists, raw git status, or node-by-node workflow logs unless they are necessary to answer
+                the user's request. Do not invent tool results. If the user asked about earlier context, answer from
+                the previous conversation prompts below.
 
                 User request:
                 %s

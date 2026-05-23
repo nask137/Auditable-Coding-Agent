@@ -12,7 +12,9 @@ import java.util.UUID;
 /**
  * Model decision for how to execute the current plan item.
  */
-public record AgentDecision(@NotNull UUID planItemId, @NotNull @Size(max = 5) List<@Valid Action> actions) {
+public record AgentDecision(@NotNull UUID planItemId,
+                            @NotNull @Size(max = 5, message = "must contain no more than 5 actions")
+                            List<@Valid Action> actions) {
     /**
      * Tool action requested by the model.
      */

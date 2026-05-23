@@ -54,7 +54,7 @@ class DeepSeekChatCompletionClientTests {
             exchange.close();
         });
         server.start();
-        var settings = new LlmSettings("http", "http://localhost:" + server.getAddress().getPort(),
+        var settings = new LlmSettings("http://localhost:" + server.getAddress().getPort(),
                 "test-key", "deepseek-v4-pro", 10, 1024, 0.1, true, "high");
         var client = new DeepSeekChatCompletionClient(settings, new ObjectMapper());
 
@@ -97,7 +97,7 @@ class DeepSeekChatCompletionClientTests {
             exchange.close();
         });
         server.start();
-        var settings = new LlmSettings("http", "http://localhost:" + server.getAddress().getPort(),
+        var settings = new LlmSettings("http://localhost:" + server.getAddress().getPort(),
                 "test-key", "deepseek-v4-pro", 10, 1024, 0.1, false, "high");
         var client = new DeepSeekChatCompletionClient(settings, new ObjectMapper());
 

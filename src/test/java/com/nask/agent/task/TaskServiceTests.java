@@ -33,12 +33,29 @@ class TaskServiceTests {
         when(repository.startExecution(eq(task.id()), eq("CODE_EDIT"), eq("coding-agent"), any()))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> service.startExecution(task, null))
+        assertThatThrownBy(() -> service.startExecution(task, "coding-agent"))
                 .isInstanceOfSatisfying(ApiException.class, error -> {
                     assertThat(error.status()).isEqualTo(HttpStatus.CONFLICT);
                     assertThat(error.code()).isEqualTo("TASK_ALREADY_EXECUTED");
                 });
 
         verify(auditService, never()).append(any());
+    }
+
+    @Test
+    void rejectsStartWithoutSelectedWorkflow() {
+        var repository = mock(TaskRepository.class);
+        var service = new TaskService(repository, mock(WorkspaceService.class),
+                mock(ConversationService.class), mock(AuditService.class));
+        var task = new CodingTask(UUID.randomUUID(), UUID.randomUUID(), "title", "request",
+                Domain.TaskStatus.CREATED.name(), Instant.now(), Instant.now());
+
+        assertThatThrownBy(() -> service.startExecution(task, null))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.status()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(error.code()).isEqualTo("WORKFLOW_REQUIRED");
+                });
+
+        verify(repository, never()).startExecution(any(), any(), any(), any());
     }
 }

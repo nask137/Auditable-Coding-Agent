@@ -548,7 +548,7 @@ $workspace = $workspaceJson | ConvertFrom-Json
 $workspaceId = $workspace.id
 ```
 
-当前 stub LLM 通常会建议执行 `java -version` 作为验证命令。为了让任务直接完成，可以先加入命令白名单：
+模型通常会建议执行 `java -version`、`mvn test` 等验证命令。为了让任务直接完成，可以先加入对应命令白名单：
 
 ```powershell
 agent command allow --workspace $workspaceId --exec java --args "-version"
@@ -574,7 +574,7 @@ agent diff $taskId
 agent report $taskId
 ```
 
-在默认 stub 行为下，Agent 会在 workspace 中创建 `AGENT_TASK_NOTE.md`，记录一次 `FileChange`，执行或申请执行 `java -version`，并生成 Markdown 格式的 `TaskReport`。
+Agent 会按真实模型返回的结构化计划执行受控文件操作和命令操作，记录 `FileChange`，执行或申请执行验证命令，并生成 Markdown 格式的 `TaskReport`。
 
 ## 16. 输出模式建议
 

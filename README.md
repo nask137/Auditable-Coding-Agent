@@ -2,7 +2,7 @@
 
 Auditable Coding Agent 是一个本地运行的可审计编码智能体后端服务。项目目标不是做一个只会聊天的 Agent，而是把编码任务拆成可追踪的步骤：理解任务、检查 workspace、生成计划、调用受控工具、记录文件变更、执行验证命令、处理审批，并生成任务报告。
 
-当前代码已推进到“阶段 4：项目记忆与代码理解”的节点化运行时基础版本。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、基础文件工具、Git 只读工具、命令审批、审计事件、结构化失败记录、恢复策略、用户介入请求、任务报告、轻量 CLI，以及可查询的 WorkflowDefinition、WorkflowNodeExecution 和 WorkflowEdgeDecision。`coding-agent` 不再通过固定 Loop 包装执行，而是由 Workflow Runtime 按节点和边调度任务理解、workspace 检查、项目记忆、代码理解、计划、计划项执行、验证、报告和结束节点。LLM 侧默认使用 `StubLlmGateway` 验证 Runtime 闭环，也可以通过 HTTP 网关接入 DeepSeek/OpenAI-compatible 模型，让模型只输出结构化任务理解、计划和工具动作意图。
+当前代码已推进到“阶段 4：项目记忆与代码理解”的节点化运行时基础版本。运行时已经具备 Spring Boot 后端、PostgreSQL 持久化、Flyway 建表、基础文件工具、Git 只读工具、命令审批、审计事件、结构化失败记录、恢复策略、用户介入请求、任务报告、轻量 CLI，以及可查询的 WorkflowDefinition、WorkflowNodeExecution 和 WorkflowEdgeDecision。`coding-agent` 不再通过固定 Loop 包装执行，而是由 Workflow Runtime 按节点和边调度任务理解、workspace 检查、项目记忆、代码理解、计划、计划项执行、验证、报告和结束节点。LLM 侧通过 HTTP 网关接入 DeepSeek/OpenAI-compatible 模型，让模型只输出结构化任务理解、计划和工具动作意图。
 
 ## 当前能力
 
@@ -142,10 +142,9 @@ agent.command.timeout-seconds=120
 agent.file.max-read-bytes=200000
 ```
 
-LLM 默认 provider 是 `stub`。接入 DeepSeek V4 Pro 时配置：
+LLM 通过 DeepSeek/OpenAI-compatible HTTP 接口调用真实模型。接入 DeepSeek V4 Pro 时配置：
 
 ```powershell
-$env:AGENT_LLM_PROVIDER='http'
 $env:AGENT_LLM_BASE_URL='https://api.deepseek.com'
 $env:AGENT_LLM_API_KEY='<your-api-key>'
 $env:AGENT_LLM_MODEL='deepseek-v4-pro'
@@ -284,7 +283,7 @@ $workspace = $workspaceJson | ConvertFrom-Json
 $workspaceId = $workspace.id
 ```
 
-当前 `StubLlmGateway` 会建议执行 `java -version` 作为验证命令。如果希望任务直接完成，可以先加入命令白名单：
+模型可能会建议执行 `java -version`、`mvn test` 等验证命令。如果希望任务直接完成，可以先加入对应命令白名单：
 
 ```powershell
 agent command allow --workspace $workspaceId --exec java --args "-version"
@@ -311,7 +310,7 @@ agent diff $taskId
 agent report $taskId
 ```
 
-在当前 Stub 行为下，Agent 会在 workspace 中创建 `AGENT_TASK_NOTE.md`，记录一次 FileChange，执行或申请执行 `java -version`，并生成 Markdown 格式的 TaskReport。
+Agent 会按真实模型返回的结构化计划执行受控文件操作和命令操作，记录 FileChange，执行或申请执行验证命令，并生成 Markdown 格式的 TaskReport。
 
 ### 工作流模式
 
@@ -523,7 +522,7 @@ mvn test
 
 ## 当前限制
 
-- 默认 LLM 实现是 `StubLlmGateway`，固定生成三步计划；配置 `AGENT_LLM_PROVIDER=http` 后可使用真实模型，但模型输出仍受结构化解析、Bean Validation 和动作白名单约束。
+- LLM 实现固定走 HTTP 真实模型接口；模型输出仍受结构化解析、Bean Validation 和动作白名单约束。
 - Workflow Runtime 仍是同步执行；后台任务队列、WebSocket/SSE 推送和多实例协调尚未实现。
 - 阶段 4 的项目记忆和代码理解是本地确定性索引与关键词检索；尚未接入向量数据库、语言服务器、增量文件监听或语义 embedding。
 - CLI 仍以本机后端 REST API 为执行入口，复杂对象的展示和交互体验还在迭代中。

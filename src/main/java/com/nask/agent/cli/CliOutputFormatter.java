@@ -116,10 +116,6 @@ class CliOutputFormatter {
                     .append("; prompt #").append(task.path("promptIndex").asText("")).append("\n\n");
         }
         builder.append(report(timeline.path("report")));
-        var changes = timeline.path("changes");
-        if (changes.isArray() && !changes.isEmpty()) {
-            builder.append("\n").append(changes(changes));
-        }
         var failures = timeline.path("failures");
         if (failures.isArray() && !failures.isEmpty()) {
             builder.append("\nRecovery records: ").append(failures.size())
@@ -208,13 +204,22 @@ class CliOutputFormatter {
             return "";
         }
         var result = content;
-        for (var marker : List.of("\n## Project Context", "\n## File Changes", "\n## Failure and Recovery",
-                "\n## Workflow", "\n## Audit Events")) {
+        for (var marker : List.of("\n## Runtime Details", "\n## Project Context", "\n## File Changes",
+                "\n## Git Working Tree", "\n## Failure and Recovery", "\n## Workflow", "\n## Audit Events",
+                "\n## Key Outputs")) {
             var index = result.indexOf(marker);
             if (index >= 0) {
                 result = result.substring(0, index);
             }
         }
+        result = result.lines()
+                .filter(line -> !line.startsWith("- Request:")
+                        && !line.startsWith("- Result:")
+                        && !line.startsWith("- Conversation memory:")
+                        && !line.startsWith("- Changed files:")
+                        && !line.startsWith("- Agent-recorded changes:")
+                        && !line.startsWith("- Git status:"))
+                .collect(java.util.stream.Collectors.joining("\n"));
         return result;
     }
 

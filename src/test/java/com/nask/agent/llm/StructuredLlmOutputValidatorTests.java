@@ -15,6 +15,31 @@ class StructuredLlmOutputValidatorTests {
             Validation.buildDefaultValidatorFactory().getValidator());
 
     @Test
+    void acceptsSupportedAgentWorkflowSelection() {
+        var selection = new AgentWorkflowSelection("review-agent", "review-agent", "Read-only inspection");
+
+        assertThat(validator.validate(selection)).isSameAs(selection);
+    }
+
+    @Test
+    void rejectsUnsupportedAgentWorkflowSelection() {
+        var selection = new AgentWorkflowSelection("docs-agent", "docs-agent", "Unsupported");
+
+        assertThatThrownBy(() -> validator.validate(selection))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("Unsupported agent");
+    }
+
+    @Test
+    void rejectsMismatchedAgentAndWorkflowSelection() {
+        var selection = new AgentWorkflowSelection("review-agent", "coding-agent", "Mismatch");
+
+        assertThatThrownBy(() -> validator.validate(selection))
+                .isInstanceOf(LlmGatewayException.class)
+                .hasMessageContaining("Agent and workflow must match");
+    }
+
+    @Test
     void acceptsSupportedToolIntent() {
         var decision = new AgentDecision(UUID.randomUUID(), List.of(
                 new AgentDecision.Action("READ_FILE", "Inspect target file", Map.of("path", "src/App.java"))));

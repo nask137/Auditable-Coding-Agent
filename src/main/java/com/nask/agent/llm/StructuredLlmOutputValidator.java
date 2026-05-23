@@ -37,6 +37,7 @@ public class StructuredLlmOutputValidator {
                     Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
         }
         switch (value) {
+            case AgentWorkflowSelection selection -> validateAgentWorkflowSelection(selection);
             case TaskUnderstanding understanding -> validateTaskUnderstanding(understanding);
             case PlanDraft plan -> validatePlanDraft(plan);
             case AgentDecision decision -> validateAgentDecision(decision);
@@ -44,6 +45,23 @@ public class StructuredLlmOutputValidator {
             }
         }
         return value;
+    }
+
+    private void validateAgentWorkflowSelection(AgentWorkflowSelection selection) {
+        var supported = Set.of("coding-agent", "review-agent", "test-agent");
+        if (!supported.contains(selection.agent())) {
+            throw new LlmGatewayException("Unsupported agent from model: " + selection.agent(),
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
+        }
+        if (!supported.contains(selection.workflow())) {
+            throw new LlmGatewayException("Unsupported workflow from model: " + selection.workflow(),
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
+        }
+        if (!selection.agent().equals(selection.workflow())) {
+            throw new LlmGatewayException("Agent and workflow must match: " + selection.agent()
+                    + " != " + selection.workflow(),
+                    Domain.RuntimeFailureType.MODEL_OUTPUT_VALIDATION_FAILED, null);
+        }
     }
 
     private void validateTaskUnderstanding(TaskUnderstanding understanding) {

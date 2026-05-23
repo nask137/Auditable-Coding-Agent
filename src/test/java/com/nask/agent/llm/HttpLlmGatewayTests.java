@@ -24,6 +24,22 @@ class HttpLlmGatewayTests {
             jakarta.validation.Validation.buildDefaultValidatorFactory().getValidator());
 
     @Test
+    void parsesAndValidatesAgentWorkflowSelection() {
+        var auditService = mock(AuditService.class);
+        when(auditService.append(any())).thenReturn(UUID.randomUUID());
+        ChatCompletionClient client = prompt -> new ChatCompletionResult("deepseek-v4-pro",
+                "{\"agent\":\"review-agent\",\"workflow\":\"review-agent\",\"rationale\":\"Read-only inspection\"}",
+                "stop", 1, 2, 3);
+        var gateway = new HttpLlmGateway(new LlmPromptFactory(), client, new ObjectMapper(), validator, auditService);
+
+        var selection = gateway.selectAgentWorkflow(new TaskContext(UUID.randomUUID(), UUID.randomUUID(),
+                null, UUID.randomUUID(), "检查README是否最新版", List.of()));
+
+        assertThat(selection.agent()).isEqualTo("review-agent");
+        assertThat(selection.workflow()).isEqualTo("review-agent");
+    }
+
+    @Test
     void parsesAndValidatesStructuredDecision() {
         var auditService = mock(AuditService.class);
         when(auditService.append(any())).thenReturn(UUID.randomUUID());
